@@ -1,0 +1,54 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/slopgene-core",
+    "crates/slopgene-script",
+    "crates/slopgene-cli",
+    "crates/slopgene-gui",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/DebrajGhose/slopgene"
+publish = false
+
+[workspace.dependencies]
+slopgene-core = { path = "crates/slopgene-core" }
+slopgene-script = { path = "crates/slopgene-script" }
+
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+thiserror = "2"
+anyhow = "1"
+lzma-rs = "0.3"
+clap = { version = "4.6", features = ["derive", "wrap_help"] }
+rhai = { version = "1.26", features = ["serde", "sync", "metadata"] }
+rayon = "1.12"
+globset = "0.4"
+walkdir = "2.5"
+eframe = { version = "0.37", default-features = false, features = [
+    "default_fonts",
+    "wgpu",
+    "wayland",
+    "x11",
+    "accesskit",
+    "persistence",
+] }
+rfd = "0.17"
+resvg = "0.48"
+
+[profile.dev]
+# Full debug info makes the GUI binary ~350 MB; line tables keep backtraces readable.
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+# egui, wgpu and rhai are slow when unoptimised; optimise dependencies even in dev builds.
+opt-level = 2
+
+[profile.release]
+lto = "thin"
+codegen-units = 4
+strip = "symbols"

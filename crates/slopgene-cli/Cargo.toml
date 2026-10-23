@@ -1,0 +1,21 @@
+[package]
+name = "slopgene-cli"
+description = "SlopGene command line: inspect, edit and analyse sequence files from scripts and agents"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "slopgene"
+path = "src/main.rs"
+
+[dependencies]
+slopgene-core = { workspace = true }
+slopgene-script = { workspace = true }
+anyhow = { workspace = true }
+clap = { workspace = true }
+serde_json = { workspace = true }
+rayon = { workspace = true }

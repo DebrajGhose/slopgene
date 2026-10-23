@@ -1,0 +1,242 @@
+# Build the SlopGene installers for Windows, macOS and Linux and put them in a draft GitHub
+# release. Pushing a tag such as v0.1.0 runs this workflow and makes the draft. Starting it by hand
+# from the Actions tab builds the same files as downloadable artifacts and makes no release.
+#
+# The packages come from cargo-packager, configured in crates/slopgene-gui/Cargo.toml. None of them
+# is code-signed (see "The first start" in the README).
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  # cargo-packager publishes no ready-made programs, so each job compiles this version.
+  CARGO_PACKAGER_VERSION: "0.11.8"
+
+# The build jobs only read the repository. The release job asks for write access itself.
+permissions:
+  contents: read
+
+jobs:
+  # The installers carry the version in Cargo.toml, so a tag must name that same version.
+  version:
+    runs-on: ubuntu-22.04
+    outputs:
+      version: ${{ steps.read.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - id: read
+        name: Read the version and compare it with the tag
+        run: |
+          version=$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"/\1/p' Cargo.toml)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "version $version"
+          if [ "$GITHUB_REF_TYPE" = "tag" ] && [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error::the tag $GITHUB_REF_NAME does not match version $version in Cargo.toml"
+            exit 1
+          fi
+
+  windows:
+    needs: version
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master, 2026-10-01
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+
+      - name: Install cargo-packager
+        run: cargo install cargo-packager --locked --version ${{ env.CARGO_PACKAGER_VERSION }}
+
+      - name: Build
+        env:
+          # Link the C runtime into the programs, so they run on a Windows without the Visual
+          # C++ redistributable.
+          RUSTFLAGS: -C target-feature=+crt-static
+        run: cargo build --release --locked -p slopgene-gui -p slopgene-cli
+
+      - name: Smoke test
+        shell: bash
+        run: target/release/slopgene.exe --version
+
+      # A setup program that installs into %LOCALAPPDATA%\SlopGene without administrator rights.
+      - name: Installer
+        run: cargo packager --release -p slopgene-gui --formats nsis
+
+      - name: Collect the files
+        shell: bash
+        run: |
+          v=${{ needs.version.outputs.version }}
+          mkdir dist
+          mv "target/release/slopgene-gui_${v}_x64-setup.exe" "dist/SlopGene_${v}_windows_x64-setup.exe"
+          7z a "dist/slopgene_${v}_windows_x64.zip" ./target/release/slopgene.exe ./target/release/slopgene-gui.exe
+          ls -l dist
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: windows
+          path: dist/*
+          if-no-files-found: error
+
+  # One universal app for Apple silicon and Intel Macs, built on an Apple silicon runner.
+  macos:
+    needs: version
+    runs-on: macos-15
+    env:
+      # The oldest macOS the programs run on, for both processor types.
+      MACOSX_DEPLOYMENT_TARGET: "11.0"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master, 2026-10-01
+        with:
+          toolchain: stable
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+
+      - name: Install cargo-packager
+        run: cargo install cargo-packager --locked --version ${{ env.CARGO_PACKAGER_VERSION }}
+
+      - name: Build for Apple silicon and for Intel
+        run: |
+          cargo build --release --locked --target aarch64-apple-darwin -p slopgene-gui -p slopgene-cli
+          cargo build --release --locked --target x86_64-apple-darwin -p slopgene-gui -p slopgene-cli
+
+      # cargo-packager looks for the programs of the target it is given, here the universal one.
+      - name: Join the two builds into universal programs
+        run: |
+          out=target/universal-apple-darwin/release
+          mkdir -p "$out"
+          for bin in slopgene slopgene-gui; do
+            lipo -create -output "$out/$bin" "target/aarch64-apple-darwin/release/$bin" "target/x86_64-apple-darwin/release/$bin"
+            lipo -info "$out/$bin"
+          done
+          "$out/slopgene" --version
+
+      - name: App bundle
+        run: cargo packager --release --target universal-apple-darwin -p slopgene-gui --formats app
+
+      # An ad-hoc signature (no Apple certificate) seals the bundle. Without one, macOS on Apple
+      # silicon calls a downloaded app "damaged" instead of offering to open it.
+      - name: Ad-hoc signature
+        run: |
+          app=target/universal-apple-darwin/release/SlopGene.app
+          codesign --force --sign - "$app/Contents/MacOS/slopgene"
+          codesign --force --sign - "$app"
+          codesign --verify --strict --verbose=2 "$app"
+
+      # The disk image holds the app and a link to /Applications to drag it onto.
+      - name: Disk image and archive
+        run: |
+          v=${{ needs.version.outputs.version }}
+          rel=target/universal-apple-darwin/release
+          mkdir -p dist stage
+          cp -R "$rel/SlopGene.app" stage/
+          ln -s /Applications stage/Applications
+          hdiutil create -volname SlopGene -srcfolder stage -ov -format UDZO "dist/SlopGene_${v}_macos_universal.dmg"
+          tar -czf "dist/slopgene_${v}_macos_universal.tar.gz" -C "$rel" slopgene slopgene-gui
+          ls -l dist
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: macos
+          path: dist/*
+          if-no-files-found: error
+
+  # Ubuntu 22.04 has an older C library than current releases, so the programs built here also
+  # run on older distributions.
+  linux:
+    needs: version
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # master, 2026-10-01
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+
+      - name: Install cargo-packager
+        run: cargo install cargo-packager --locked --version ${{ env.CARGO_PACKAGER_VERSION }}
+
+      - name: Build
+        run: cargo build --release --locked -p slopgene-gui -p slopgene-cli
+
+      - name: Packages
+        env:
+          # linuxdeploy, which assembles the AppImage, is an AppImage itself. This setting lets it
+          # run without FUSE.
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+        run: cargo packager --release -p slopgene-gui --formats deb,appimage
+
+      # Unpack both packages and run the command line from each, without installing anything.
+      - name: Check the packages
+        run: |
+          v=${{ needs.version.outputs.version }}
+          deb="target/release/slopgene-gui_${v}_amd64.deb"
+          dpkg-deb --info "$deb"
+          dpkg-deb --contents "$deb"
+          unpacked=$(mktemp -d)
+          dpkg-deb -x "$deb" "$unpacked"
+          "$unpacked/usr/bin/slopgene" --version
+          appimage="$PWD/target/release/slopgene-gui_${v}_x86_64.AppImage"
+          chmod +x "$appimage"
+          cd "$(mktemp -d)"
+          "$appimage" --appimage-extract > /dev/null
+          squashfs-root/usr/bin/slopgene --version
+
+      - name: Collect the files
+        run: |
+          v=${{ needs.version.outputs.version }}
+          mkdir dist
+          mv "target/release/slopgene-gui_${v}_amd64.deb" "dist/slopgene_${v}_amd64.deb"
+          mv "target/release/slopgene-gui_${v}_x86_64.AppImage" "dist/SlopGene_${v}_x86_64.AppImage"
+          tar -czf "dist/slopgene_${v}_linux_x86_64.tar.gz" -C target/release slopgene slopgene-gui
+          ls -l dist
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: linux
+          path: dist/*
+          if-no-files-found: error
+
+  # A draft release holding every file, for a person to read over and publish.
+  release:
+    needs: [version, windows, macos, linux]
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Checksums
+        working-directory: dist
+        run: |
+          sha256sum * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          cat > notes.md <<'EOF'
+          | System | Install with | Command line only |
+          |---|---|---|
+          | Windows 10 or 11 (x64) | `SlopGene_*_windows_x64-setup.exe` | `slopgene_*_windows_x64.zip` |
+          | macOS 11 or later (Apple silicon and Intel) | `SlopGene_*_macos_universal.dmg` | `slopgene_*_macos_universal.tar.gz` |
+          | Linux (x86_64) | `slopgene_*_amd64.deb` or `SlopGene_*_x86_64.AppImage` | `slopgene_*_linux_x86_64.tar.gz` |
+
+          EOF
+          # The link names this repository, so the notes stay right in a fork or a renamed repository.
+          {
+            echo "The installers are not code-signed. [The first start]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY#the-first-start) in the README says how to open them anyway."
+            echo '`SHA256SUMS.txt` holds the checksum of each file.'
+          } >> notes.md
+          gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --draft --verify-tag --title "SlopGene $VERSION" --notes-file notes.md

@@ -1,0 +1,71 @@
+# Build, lint and test SlopGene on Linux, macOS and Windows, and keep the release programs of
+# each run as downloadable artifacts.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      # No system packages are needed: the app loads Wayland, X11 and GPU libraries at run time.
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Formatting
+        if: runner.os == 'Linux'
+        run: cargo fmt --all --check
+
+      - name: Lints
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Tests
+        run: cargo test --workspace
+
+      - name: Release build
+        run: cargo build --release --workspace
+
+      - name: Smoke test of the command line
+        shell: bash
+        run: |
+          exe=target/release/slopgene
+          "$exe" --version
+          "$exe" tm GTAAAACGACGGCCAGT --json
+          "$exe" run -e 'let d = new_dna("demo", "GAATTCAAAAGGATCC", "circular"); d.cut_counts("EcoRI,BamHI")' --json
+          "$exe" run --api > /dev/null
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: slopgene-${{ runner.os }}
+          path: |
+            target/release/slopgene
+            target/release/slopgene-gui
+            target/release/slopgene.exe
+            target/release/slopgene-gui.exe
+          if-no-files-found: error
+
+  # The oldest Rust the workspace promises to build with (rust-version in Cargo.toml).
+  msrv:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.95
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo check --workspace --all-targets

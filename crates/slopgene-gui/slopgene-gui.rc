@@ -1,0 +1,3 @@
+// Windows resources of slopgene-gui.exe, compiled by build.rs. The first icon is the program's
+// icon in Explorer, the Start menu and the taskbar.
+1 ICON "assets/icon/slopgene.ico"

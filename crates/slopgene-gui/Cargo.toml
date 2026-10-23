@@ -1,0 +1,90 @@
+[package]
+name = "slopgene-gui"
+description = "SlopGene desktop app: view and edit plasmid maps and sequences"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "slopgene-gui"
+path = "src/main.rs"
+
+[dependencies]
+slopgene-core = { workspace = true }
+slopgene-script = { workspace = true }
+eframe = { workspace = true }
+rfd = { workspace = true }
+
+# Puts the app icon into slopgene-gui.exe (see build.rs). Cargo picks build dependencies by the
+# machine doing the build, and only Windows machines build the Windows program here.
+[target.'cfg(windows)'.build-dependencies]
+embed-resource = "3.0.11"
+
+[dev-dependencies]
+# Renders the icon files (examples/make_icons.rs).
+resvg = { workspace = true }
+
+# The installers, made by cargo-packager (https://github.com/crabnebula-dev/cargo-packager).
+# The packager compiles nothing, so build both programs first and then package them:
+#   cargo build --release -p slopgene-gui -p slopgene-cli
+#   cargo packager --release -p slopgene-gui --formats nsis            (Windows: setup .exe)
+#   cargo packager --release -p slopgene-gui --formats app             (macOS: .app bundle)
+#   cargo packager --release -p slopgene-gui --formats deb,appimage    (Linux)
+# The packages land in target/release. .github/workflows/release.yml makes all of them, and the
+# macOS disk image. Paths below are relative to this folder.
+[package.metadata.packager]
+product-name = "SlopGene"
+identifier = "io.github.debrajghose.slopgene"
+publisher = "Debraj Ghose"
+authors = ["Debraj Ghose"]
+description = "Plasmid maps, sequences and cloning, with a scriptable core"
+long-description = """
+SlopGene views and edits plasmid maps and DNA sequences. It reads and writes SnapGene, GenBank and
+FASTA files, finds restriction sites, simulates digests, PCR and cloning, and checks sequencing
+results against maps. The package holds the desktop app (slopgene-gui) and the command line
+(slopgene)."""
+homepage = "https://github.com/DebrajGhose/slopgene"
+# The Windows setup program shows this line at its foot and in its file properties, and the macOS
+# app carries it in its Info.plist. The setup program has no licence page to click through,
+# because the licence asks nothing of people who only use the programs. LICENSE-MIT and
+# LICENSE-APACHE at the top of the repository hold its text.
+copyright = "Copyright 2026 Debraj Ghose. Licensed under MIT OR Apache-2.0."
+category = "Education"
+# The app is the main program. The command line travels with it: beside the app on Windows,
+# inside the app bundle on macOS and in /usr/bin on Linux.
+binaries = [{ path = "slopgene-gui", main = true }, { path = "slopgene", main = false }]
+# Linux packages use the PNGs, macOS the .icns and the Windows installer the .ico.
+icons = ["assets/icon/slopgene-*.png", "assets/icon/slopgene.icns", "assets/icon/slopgene.ico"]
+
+[package.metadata.packager.nsis]
+# The installer needs no administrator rights: it installs into %LOCALAPPDATA%\SlopGene.
+installer-mode = "currentUser"
+installer-icon = "assets/icon/slopgene.ico"
+# The uninstaller offers to delete the app's settings too.
+appdata-paths = ['$APPDATA\$PRODUCTNAME']
+
+[package.metadata.packager.macos]
+minimum-system-version = "11.0"
+
+[package.metadata.packager.deb]
+package-name = "slopgene"
+section = "science"
+# The launcher lists the app under Science and Biology.
+desktop-template = "packaging/slopgene-gui.desktop"
+# The app opens its window through Wayland or X11 and draws with Vulkan or OpenGL. It loads these
+# libraries while it runs, so the linker does not record them and they are listed here.
+depends = [
+    "libc6 (>= 2.35)",
+    "libgcc-s1",
+    "libxkbcommon0",
+    "libxkbcommon-x11-0",
+    "libwayland-client0",
+    "libx11-6",
+    "libxcursor1",
+    "libxrandr2",
+    "libxi6",
+    "libvulkan1 | libegl1",
+]

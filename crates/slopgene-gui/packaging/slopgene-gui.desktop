@@ -1,0 +1,16 @@
+# The Linux launcher for SlopGene, a template that cargo-packager fills in (see Cargo.toml).
+# StartupWMClass matches the app id the window reports, so docks show this launcher's icon.
+[Desktop Entry]
+Type=Application
+Name={{name}}
+{{#if comment}}
+Comment={{comment}}
+{{/if}}
+Exec={{exec}}{{#if exec_arg}} {{exec_arg}}{{/if}}
+Icon={{icon}}
+Terminal=false
+Categories=Science;Biology;
+StartupWMClass=slopgene-gui
+{{#if mime_type}}
+MimeType={{mime_type}}
+{{/if}}
