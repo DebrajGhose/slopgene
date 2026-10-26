@@ -2,6 +2,7 @@
 name = "slopgene-script"
 description = "Rhai scripting for SlopGene: open, analyse and edit sequence files from scripts"
 version.workspace = true
+authors.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true

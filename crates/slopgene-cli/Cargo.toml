@@ -2,6 +2,7 @@
 name = "slopgene-cli"
 description = "SlopGene command line: inspect, edit and analyse sequence files from scripts and agents"
 version.workspace = true
+authors.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true

@@ -2,6 +2,7 @@
 name = "slopgene-gui"
 description = "SlopGene desktop app: view and edit plasmid maps and sequences"
 version.workspace = true
+authors.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -40,7 +41,7 @@ resvg = { workspace = true }
 product-name = "SlopGene"
 identifier = "io.github.debrajghose.slopgene"
 publisher = "Debraj Ghose"
-authors = ["Debraj Ghose"]
+authors = ["Claude", "Debraj Ghose"]
 description = "Plasmid maps, sequences and cloning, with a scriptable core"
 long-description = """
 SlopGene views and edits plasmid maps and DNA sequences. It reads and writes SnapGene, GenBank and

@@ -9,6 +9,7 @@ members = [
 
 [workspace.package]
 version = "0.2.0"
+authors = ["Claude", "Debraj Ghose"]
 edition = "2024"
 rust-version = "1.95"
 license = "MIT OR Apache-2.0"

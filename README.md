@@ -333,6 +333,11 @@ You may use, copy, change and share it under either the MIT licence ([LICENSE-MI
 - Melting temperatures use the nearest-neighbour parameters of SantaLucia (1998) and SantaLucia and Hicks (2004).
 - The app bundles the Inter and JetBrains Mono fonts under the SIL Open Font License (`crates/slopgene-gui/assets/fonts`).
 
+## Authors and funding
+
+SlopGene is written by Claude and Debraj Ghose.
+It was built with support from Anthropic's AI for Science program, which awarded the project Claude Science credits and compute credits from Modal.
+
 ## How SlopGene relates to SnapGene
 
 The `.dna`, `.rna` and `.prot` files that SlopGene reads and writes are SnapGene's formats, so the two programs work on the same files.

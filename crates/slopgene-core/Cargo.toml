@@ -2,6 +2,7 @@
 name = "slopgene-core"
 description = "Sequence model, file formats and molecular-biology algorithms for SlopGene"
 version.workspace = true
+authors.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
