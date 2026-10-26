@@ -371,8 +371,8 @@ pub fn design_pcr_primers(
     let (a, b) = span.to_1based(doc.len());
     let mut forward = Primer::new(format!("{}_{a}_F", doc.name), String::from_utf8_lossy(&fwd).to_uppercase());
     let mut reverse = Primer::new(format!("{}_{b}_R", doc.name), String::from_utf8_lossy(&rev).to_uppercase());
-    forward.description = format!("anneals {fwd_len} nt, Tm {:.1} C", melting_temperature(&region[..fwd_len], conditions));
-    reverse.description = format!("anneals {rev_len} nt, Tm {:.1} C", melting_temperature(&rc_region[..rev_len], conditions));
+    forward.description = format!("anneals {fwd_len} nt, Tm {:.1} °C", melting_temperature(&region[..fwd_len], conditions));
+    reverse.description = format!("anneals {rev_len} nt, Tm {:.1} °C", melting_temperature(&rc_region[..rev_len], conditions));
     Ok((forward, reverse))
 }
 

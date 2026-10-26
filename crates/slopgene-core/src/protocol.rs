@@ -49,7 +49,7 @@ use crate::error::{Error, Result};
 use crate::json;
 use crate::model::*;
 use crate::pcr;
-use crate::primer_design::{DesignOptions, SITE_PADDING, design_pairs, site_tail};
+use crate::primer_design::{DEFAULT_TARGET_TM, DesignOptions, SITE_PADDING, design_pairs, site_tail};
 use crate::primers::BindingRules;
 use crate::render::thousands;
 use crate::span::{Span, parse_range};
@@ -251,6 +251,11 @@ pub struct AmplifyParams {
     pub forward_primer: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reverse_primer: Option<String>,
+    /// The melting temperature the design aims for, in degrees Celsius, for the part of each
+    /// primer that anneals. Unset, the designer aims at its default of 60. Kept primers are not
+    /// designed again, so the aim counts once they are designed anew.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target_tm: Option<f64>,
 }
 
 impl AmplifyParams {
@@ -284,6 +289,23 @@ impl AmplifyParams {
     /// Whether the primers are kept in the step, rather than designed anew on each run.
     pub fn pinned(&self) -> bool {
         self.forward_primer.is_some() && self.reverse_primer.is_some()
+    }
+}
+
+/// The melting temperatures a primer design may aim for. Outside this range no primer of a
+/// sensible length has that Tm, so a value there is a slip.
+pub const TARGET_TM_RANGE: std::ops::RangeInclusive<f64> = 40.0..=80.0;
+
+/// Check a melting temperature to aim a primer design at.
+pub fn check_target_tm(tm: f64) -> Result<()> {
+    if tm.is_finite() && TARGET_TM_RANGE.contains(&tm) {
+        Ok(())
+    } else {
+        Err(Error::Invalid(format!(
+            "the melting temperature to aim for must be between {} and {} °C (got {tm})",
+            TARGET_TM_RANGE.start(),
+            TARGET_TM_RANGE.end()
+        )))
     }
 }
 
@@ -919,6 +941,23 @@ impl Protocol {
         Ok(())
     }
 
+    /// Aim the design of PCR step `id`'s primers at a melting temperature, in degrees Celsius,
+    /// for the part of each primer that anneals, or at the designer's default with `None`. Kept
+    /// primers stay as they are, so the aim counts once they are designed anew.
+    pub fn set_target_tm(&mut self, id: &str, tm: Option<f64>) -> Result<()> {
+        if let Some(tm) = tm {
+            check_target_tm(tm)?;
+        }
+        let step = self.steps.iter_mut().find(|s| s.id == id).ok_or_else(|| Error::Invalid(format!("no step is called {id}")))?;
+        match &mut step.action {
+            Action::Amplify(params) => {
+                params.target_tm = tm;
+                Ok(())
+            }
+            _ => Err(Error::Invalid(format!("{id} is not a PCR, so it has no primers to design"))),
+        }
+    }
+
     /// The open step and the first cut of the lane step `id` is in, whichever step of the lane
     /// `id` is.
     fn lane_cut(&self, id: &str) -> Result<(String, String)> {
@@ -1358,8 +1397,9 @@ pub enum Change {
     /// [`Protocol::cut_out`] does.
     CutOut { step: String },
     /// The primers of PCR step `step`: pair `pair` (from 1) of those a run designs, the two
-    /// given, or with none of the three a new design on each run.
-    Primers { step: String, pair: Option<usize>, forward: Option<String>, reverse: Option<String> },
+    /// given, or with none of the three a new design on each run. `tm` first aims the design at
+    /// that melting temperature, so a pair kept is one designed at it.
+    Primers { step: String, pair: Option<usize>, forward: Option<String>, reverse: Option<String>, tm: Option<f64> },
     /// Make pick step `pick` keep piece `piece` (from 1) of its cut, as a click on that piece
     /// does in the app.
     Keep { pick: String, piece: usize },
@@ -1492,30 +1532,37 @@ impl Protocol {
                 let cut = self.cut_out(step)?;
                 Ok(format!("{cut} cuts the part out of {open} again, without a PCR"))
             }
-            Change::Primers { step, pair, forward, reverse } => match (pair, forward, reverse) {
-                (Some(pair), None, None) => {
-                    // The pairs are those a run designs once no pair is kept.
-                    let mut trial = self.clone();
-                    trial.set_primers(step, None, None)?;
-                    let ran = run(&trial, folder, db);
-                    let pairs = ran.step(step).map(|r| r.findings.primer_pairs.clone()).unwrap_or_default();
-                    let chosen = pairs.get(pair.wrapping_sub(1)).ok_or_else(|| match pairs.len() {
-                        0 => Error::Invalid(format!("{step} designed no primers; see `protocol run` for why")),
-                        n => Error::Invalid(format!("{step} designed pairs 1 to {n}, so there is no pair {pair}")),
-                    })?;
-                    self.set_primers(step, Some(chosen.forward.clone()), Some(chosen.reverse.clone()))?;
-                    Ok(format!("{step} keeps primer pair {pair}: {} and {}", chosen.forward, chosen.reverse))
+            Change::Primers { step, pair, forward, reverse, tm } => {
+                // The aim comes first, so a pair kept here is one designed at it.
+                if let Some(tm) = tm {
+                    self.set_target_tm(step, Some(*tm))?;
                 }
-                (None, Some(forward), Some(reverse)) => {
-                    self.set_primers(step, Some(forward.clone()), Some(reverse.clone()))?;
-                    Ok(format!("{step} uses the primers given"))
+                let aimed = tm.map(|tm| format!(", aiming at a Tm of {tm:.1} °C")).unwrap_or_default();
+                match (pair, forward, reverse) {
+                    (Some(pair), None, None) => {
+                        // The pairs are those a run designs once no pair is kept.
+                        let mut trial = self.clone();
+                        trial.set_primers(step, None, None)?;
+                        let ran = run(&trial, folder, db);
+                        let pairs = ran.step(step).map(|r| r.findings.primer_pairs.clone()).unwrap_or_default();
+                        let chosen = pairs.get(pair.wrapping_sub(1)).ok_or_else(|| match pairs.len() {
+                            0 => Error::Invalid(format!("{step} designed no primers; see `protocol run` for why")),
+                            n => Error::Invalid(format!("{step} designed pairs 1 to {n}, so there is no pair {pair}")),
+                        })?;
+                        self.set_primers(step, Some(chosen.forward.clone()), Some(chosen.reverse.clone()))?;
+                        Ok(format!("{step} keeps primer pair {pair}: {} and {}{aimed}", chosen.forward, chosen.reverse))
+                    }
+                    (None, Some(forward), Some(reverse)) => {
+                        self.set_primers(step, Some(forward.clone()), Some(reverse.clone()))?;
+                        Ok(format!("{step} uses the primers given"))
+                    }
+                    (None, None, None) => {
+                        self.set_primers(step, None, None)?;
+                        Ok(format!("{step} designs its primers anew{aimed}"))
+                    }
+                    _ => Err(Error::Invalid("give a pair number, both primers, or neither to design them anew".into())),
                 }
-                (None, None, None) => {
-                    self.set_primers(step, None, None)?;
-                    Ok(format!("{step} designs its primers anew"))
-                }
-                _ => Err(Error::Invalid("give a pair number, both primers, or neither to design them anew".into())),
-            },
+            }
         }
     }
 }
@@ -1552,6 +1599,8 @@ pub struct NewFile {
     pub dephosphorylate: bool,
     /// Copy the insert out by PCR, with the enzymes' sites on the primers, rather than cut it out.
     pub pcr: bool,
+    /// With `pcr`, the melting temperature the primer design aims for, or none for the default.
+    pub tm: Option<f64>,
 }
 
 /// Write a new restriction-cloning protocol file at `path` (see
@@ -1560,6 +1609,9 @@ pub struct NewFile {
 pub fn write_new(path: &Path, new: &NewFile, force: bool, db: &EnzymeDb) -> Result<(Protocol, Run)> {
     if path.exists() && !force {
         return Err(Error::Invalid(format!("{} exists; replace it only on purpose (--force, or force: true)", path.display())));
+    }
+    if let Some(tm) = new.tm {
+        check_target_tm(tm)?;
     }
     let (vector, donor) = (crate::io::read_one(&new.vector)?, crate::io::read_one(&new.insert)?);
     if let Some(part) = &new.cut_out {
@@ -1571,7 +1623,7 @@ pub fn write_new(path: &Path, new: &NewFile, force: bool, db: &EnzymeDb) -> Resu
     // The protocol finds its maps from its own folder.
     let folder = Folder::of(path);
     let opened = |file: &Path| OpenParams { path: Some(stored_path(&folder.0, file)), document: None };
-    let protocol = Protocol::restriction_cloning(&CloningTemplate {
+    let mut protocol = Protocol::restriction_cloning(&CloningTemplate {
         name: new.name.clone().unwrap_or_else(|| format!("{} into {}", new.cut_out.as_deref().unwrap_or(&donor.name), vector.name)),
         vector: Some(opened(&new.vector)),
         donor: opened(&new.insert),
@@ -1583,6 +1635,14 @@ pub fn write_new(path: &Path, new: &NewFile, force: bool, db: &EnzymeDb) -> Resu
         pcr: new.pcr,
         ..CloningTemplate::default()
     });
+    // The PCR's primers are designed at the melting temperature asked for.
+    if let Some(tm) = new.tm {
+        for step in &mut protocol.steps {
+            if let Action::Amplify(params) = &mut step.action {
+                params.target_tm = Some(tm);
+            }
+        }
+    }
     crate::io::write_atomic(path, protocol.to_json().as_bytes())?;
     let ran = run(&protocol, &folder, db);
     Ok((protocol, ran))
@@ -2209,7 +2269,14 @@ fn run_amplify(input: &Piece, params: &AmplifyParams, step_id: &str, db: &Enzyme
     let (forward, reverse) = match (&params.forward_primer, &params.reverse_primer) {
         (Some(f), Some(r)) => (f.clone(), r.clone()),
         _ => {
-            let options = DesignOptions { forward_tail: tails[0].clone(), reverse_tail: tails[1].clone(), count: 5, ..DesignOptions::default() };
+            // The design aims at the step's melting temperature, or the designer's default.
+            let options = DesignOptions {
+                forward_tail: tails[0].clone(),
+                reverse_tail: tails[1].clone(),
+                count: 5,
+                target_tm: params.target_tm.unwrap_or(DEFAULT_TARGET_TM),
+                ..DesignOptions::default()
+            };
             let pairs = design_pairs(template, region, &options)
                 .map_err(|e| Issue::new("amplify.no_primers", e.to_string()).fix("mark a longer part, or one whose ends hold no ambiguous bases"))?;
             result.findings.primer_pairs = pairs
@@ -2260,7 +2327,7 @@ fn run_amplify(input: &Piece, params: &AmplifyParams, step_id: &str, db: &Enzyme
     let described = |primer: &Primer, site: &crate::primers::Binding, tail: usize| -> Primer {
         let mut p = primer.clone();
         let tail = if tail > 0 { format!(", {tail}-nt 5' tail") } else { String::new() };
-        p.description = format!("anneals {} nt, Tm {:.1} C{tail}", site.annealed, site.tm);
+        p.description = format!("anneals {} nt, Tm {:.1} °C{tail}", site.annealed, site.tm);
         p.sites = vec![BindingSite { span: site.span, strand: site.strand, tm: Some(site.tm), extra: XmlExtra::default() }];
         p
     };
@@ -2870,6 +2937,9 @@ pub fn story(protocol: &Protocol, run: &Run, index: usize) -> Story {
                     (None, Some(r)) => format!("The reverse primer's 5' tail holds the {r} site, and the forward primer has no tail."),
                 };
                 story.details.push(format!("The primers anneal at the two ends of {part} and copy it. {ends}"));
+                if let Some(tm) = params.target_tm {
+                    story.details.push(format!("Their design aims at a melting temperature of {tm:.1} °C for the part that anneals."));
+                }
                 if let Some(r) = result.filter(|_| status == Some(Status::Done)) {
                     for p in &r.findings.primers {
                         story.details.push(format!("{}: {} ({}).", p.name, p.seq, p.description));
@@ -4246,7 +4316,13 @@ mod tests {
         assert_eq!(ids(&protocol), vec!["vector", "cut_vector", "backbone", "cip", "donor", "pcr_donor", "cut_pcr", "insert", "product"]);
         assert!(ran.steps.iter().all(|s| s.status == Status::Done), "{}", ran.text(&protocol));
         // Keeping pair 2 writes it into the file. A pair that was not designed is refused.
-        let keep = |pair: Option<usize>, forward: Option<String>, reverse: Option<String>| Change::Primers { step: "pcr_donor".into(), pair, forward, reverse };
+        let keep = |pair: Option<usize>, forward: Option<String>, reverse: Option<String>| Change::Primers {
+            step: "pcr_donor".into(),
+            pair,
+            forward,
+            reverse,
+            tm: None,
+        };
         let (changed, _, said) = change_file(&path, db, &keep(Some(2), None, None)).unwrap();
         assert!(said.starts_with("pcr_donor keeps primer pair 2: "), "{said}");
         let params = amplify_params(&changed, "pcr_donor");
@@ -4256,6 +4332,21 @@ mod tests {
         // Primers typed in, and a new design.
         let (_, _, said) = change_file(&path, db, &keep(None, params.forward_primer.clone(), params.reverse_primer.clone())).unwrap();
         assert_eq!(said, "pcr_donor uses the primers given");
+        let (_, _, said) = change_file(&path, db, &keep(None, None, None)).unwrap();
+        assert_eq!(said, "pcr_donor designs its primers anew");
+        // An aim for the design: it is stored, the primers follow it, a pair kept with it is one
+        // designed at it, and a temperature no primer can have is refused.
+        let aim = |tm: f64, pair: Option<usize>| Change::Primers { step: "pcr_donor".into(), pair, forward: None, reverse: None, tm: Some(tm) };
+        let (changed, low, said) = change_file(&path, db, &aim(52.0, None)).unwrap();
+        assert_eq!(said, "pcr_donor designs its primers anew, aiming at a Tm of 52.0 °C");
+        assert_eq!(amplify_params(&changed, "pcr_donor").target_tm, Some(52.0));
+        let (_, high, _) = change_file(&path, db, &aim(68.0, None)).unwrap();
+        let best_tm = |ran: &Run| ran.step("pcr_donor").unwrap().findings.primer_pairs[0].forward_tm;
+        assert!(best_tm(&low) < best_tm(&high), "{} at 52 C against {} at 68 C", best_tm(&low), best_tm(&high));
+        let (changed, _, said) = change_file(&path, db, &aim(62.0, Some(1))).unwrap();
+        assert!(said.starts_with("pcr_donor keeps primer pair 1: ") && said.ends_with(", aiming at a Tm of 62.0 °C"), "{said}");
+        assert!(amplify_params(&changed, "pcr_donor").pinned());
+        assert!(change_file(&path, db, &aim(95.0, None)).is_err());
         let (_, _, said) = change_file(&path, db, &keep(None, None, None)).unwrap();
         assert_eq!(said, "pcr_donor designs its primers anew");
         // New tails through the cut change (the same two enzymes the other way round), told as a

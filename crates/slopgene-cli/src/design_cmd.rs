@@ -31,7 +31,7 @@ pub fn tm(seqs: &[String], conditions: TmConditions) -> Result<Output> {
         rows.push(vec![
             String::from_utf8_lossy(&bases).into_owned(),
             report.length.to_string(),
-            format!("{:.1} C", report.tm),
+            format!("{:.1} °C", report.tm),
             format!("{:.0}%", report.gc_percent),
             report.warnings.join("; "),
         ]);

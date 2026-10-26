@@ -77,13 +77,14 @@ The command line sits beside the app.
 
 ### Updating
 
-When it starts, SlopGene asks GitHub once whether a newer version has been released.
-When there is one, an "Update to 0.3.0" button appears in the top bar.
-It opens a dialog that says which file will be downloaded and what will happen on this computer, and "Download and install" does the rest: the file is downloaded, checked against the release's checksums and installed, and SlopGene starts again.
+The Update button in the top bar opens a dialog that says whether a newer version has been released.
+SlopGene also asks GitHub once when it starts, and the button takes the accent colour when there is one.
+The dialog says which file will be downloaded and what will happen on this computer, and "Download and install" does the rest: the file is downloaded, checked against the release's checksums and installed, and SlopGene starts again.
 On Windows the installer runs by itself with a progress bar.
 On macOS the programs inside SlopGene.app are replaced and the app is signed again.
 On Linux the AppImage file is replaced, or the package is installed after the password prompt.
-"Check for updates…" in the command palette looks at any time, and a checkbox in the dialog turns the check at start off.
+"Check for updates…" in the command palette opens the same dialog, and a checkbox in it turns the check at start off.
+The window title shows the version you have.
 The command line does the same with `slopgene update`, and `slopgene update --install` installs the newer version.
 A copy built from the source tree is not updated this way: build it again.
 
@@ -234,6 +235,7 @@ One click per primer puts an enzyme's site on its tail.
 The cut after the PCR trims the tails, so the piece has the sticky ends the vector has.
 The vector's enzymes carry over to the tails, and new tails carry over to the vector.
 The primers are designed anew on each run until "Keep these primers" writes them into the protocol, so they stay as they are when a map changes.
+A field above them sets the melting temperature the design aims for, 60 °C unless changed, and each primer's own Tm is shown beside it.
 Each primer has a Copy button, and the other pairs designed are a click away.
 "Cut the part out instead" turns the lane back.
 

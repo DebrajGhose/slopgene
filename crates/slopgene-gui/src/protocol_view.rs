@@ -1111,6 +1111,8 @@ enum PrimerEdit {
     Given(String, String),
     /// Design them anew on each run.
     Clear,
+    /// Aim the design at this melting temperature.
+    Aim(f64),
 }
 
 /// A change to the step at `index`. A key merges quick changes of one field into one undo step.
@@ -1425,6 +1427,15 @@ fn apply(tab: &mut ProtocolTab, edits: Vec<Edit>) -> Requests {
                     Err(e) => tab.notice = Some((e.to_string(), Instant::now())),
                 }
             }
+            Edit::Primers(step, PrimerEdit::Aim(tm)) => {
+                let Some(id) = tab.protocol.steps.get(step).map(|s| s.id.clone()) else { continue };
+                let mut outcome = Ok(());
+                tab.change(Some(format!("aim-{id}")), |p| outcome = p.set_target_tm(&id, Some(tm)));
+                if outcome.is_ok() {
+                    tell(tab, format!("The primers are designed for a melting temperature of about {tm:.1} °C."));
+                }
+                report(tab, outcome);
+            }
             Edit::Primers(step, what) => {
                 let Some(id) = tab.protocol.steps.get(step).map(|s| s.id.clone()) else { continue };
                 let (forward, reverse) = match what {
@@ -1434,6 +1445,7 @@ fn apply(tab: &mut ProtocolTab, edits: Vec<Edit>) -> Requests {
                     }
                     PrimerEdit::Given(f, r) => (Some(f), Some(r)),
                     PrimerEdit::Clear => (None, None),
+                    PrimerEdit::Aim(_) => unreachable!("an aim is applied above"),
                 };
                 let kept = forward.is_some();
                 let mut outcome = Ok(());
@@ -3906,6 +3918,7 @@ fn copy_section(
     // pair or to design them anew. Then the product.
     let Some(result) = result.filter(|r| r.status == Status::Done) else { return };
     section_title(ui, "Primers", palette);
+    aim_field(ui, tab, copy, params, palette, edits);
     for p in &result.findings.primers {
         ui.horizontal(|ui| {
             ui.label(RichText::new(&p.name).font(style::bold_font(12.5)).color(palette.ink));
@@ -3935,7 +3948,7 @@ fn copy_section(
                             edits.push(Edit::Primers(copy, PrimerEdit::Pair(ii)));
                         }
                         let mut words = format!(
-                            "Tm {:.1} and {:.1} C, {} and {} nt anneal, {} bp product",
+                            "Tm {:.1} and {:.1} °C, {} and {} nt anneal, {} bp product",
                             pair.forward_tm,
                             pair.reverse_tm,
                             pair.forward_anneals,
@@ -4286,6 +4299,7 @@ fn amplify_editor(ui: &mut egui::Ui, tab: &ProtocolTab, index: usize, params: &A
             }
         }
     }
+    aim_field(ui, tab, index, params, palette, edits);
     field_label(ui, "Primers, 5' to 3' with their tails (empty to design them)", palette);
     let forward =
         committed_text(ui, egui::Id::unique(("protocol-forward-primer", tab.id, index)), params.forward_primer.as_deref().unwrap_or(""), "forward primer");
@@ -4297,6 +4311,34 @@ fn amplify_editor(ui: &mut egui::Ui, tab: &ProtocolTab, index: usize, params: &A
         let r = reverse.unwrap_or_else(|| params.reverse_primer.clone().unwrap_or_default()).trim().to_string();
         edits.push(Edit::Primers(index, if f.is_empty() && r.is_empty() { PrimerEdit::Clear } else { PrimerEdit::Given(f, r) }));
     }
+}
+
+/// The melting temperature a PCR's primer design aims for: a number to enter, beside the
+/// temperatures calculated for the primers. Kept primers are not designed again, so the field
+/// waits until they are let go. The protocol takes the new aim once the drag or the typing is
+/// over, and the steps of one drag share one undo step.
+fn aim_field(ui: &mut egui::Ui, tab: &ProtocolTab, index: usize, params: &AmplifyParams, palette: &Palette, edits: &mut Vec<Edit>) {
+    let id = egui::Id::unique(("protocol-aim-tm", tab.id, index));
+    let stored = params.target_tm.unwrap_or(slopgene_core::primer_design::DEFAULT_TARGET_TM);
+    let mut aim = ui.data(|d| d.get_temp::<f64>(id)).unwrap_or(stored);
+    ui.horizontal(|ui| {
+        ui.label(RichText::new("Aim for a Tm of").color(palette.ink));
+        let field = ui
+            .add_enabled(!params.pinned(), egui::DragValue::new(&mut aim).range(protocol::TARGET_TM_RANGE).speed(0.1).fixed_decimals(1).suffix(" °C"))
+            .on_hover_text("The melting temperature the design aims for, for the part of each primer that anneals. Drag the number or type one.")
+            .on_disabled_hover_text("The kept primers stay as they are. Design them anew to aim at another temperature.");
+        if field.changed() {
+            ui.data_mut(|d| d.insert_temp(id, aim));
+        }
+        let settled = field.drag_stopped() || field.lost_focus() || (field.changed() && !field.dragged() && !field.has_focus());
+        if settled {
+            ui.data_mut(|d| d.remove_temp::<f64>(id));
+            if (aim - stored).abs() > 0.05 {
+                edits.push(Edit::Primers(index, PrimerEdit::Aim(aim)));
+            }
+        }
+        ui.label(RichText::new("for the part that anneals").small().color(palette.muted));
+    });
 }
 
 /// What a pick looks for. Every criterion set must hold.
@@ -5122,6 +5164,10 @@ mod tests {
         apply(&mut tab, vec![Edit::Primers(copy, PrimerEdit::Clear)]);
         let Action::Amplify(params) = &tab.protocol.steps[copy].action else { panic!("pcr_donor is a PCR") };
         assert!(!params.pinned());
+        // An aim for the design is stored, and the field's edit goes the same way.
+        apply(&mut tab, vec![Edit::Primers(copy, PrimerEdit::Aim(55.0))]);
+        let Action::Amplify(params) = &tab.protocol.steps[copy].action else { panic!("pcr_donor is a PCR") };
+        assert_eq!(params.target_tm, Some(55.0));
         // Zoomed into the PCR, the view is headed by the PCR and shows the donor's map with the
         // primers drawn on it.
         let mut screen = Screen::new();

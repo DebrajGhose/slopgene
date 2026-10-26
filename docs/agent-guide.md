@@ -159,6 +159,7 @@ The JSON is the run's JSON with `changed`, a few words on what changed, and `sav
 | Cut it out again, without the PCR | `slopgene protocol cut-out clone.json donor` |
 | Keep a pair of the primers a PCR designed | `slopgene protocol primers clone.json pcr_donor --pair 1` |
 | Use primers of your own, or design them anew on each run | `slopgene protocol primers clone.json pcr_donor --fwd TAAGCAGAATTC... --rev ...`, `--clear` |
+| Aim the primer design at a melting temperature | `slopgene protocol primers clone.json pcr_donor --tm 58` |
 
 `add` gives its steps new ids, such as `donor_2`, `cut_donor_2` and `insert_2`.
 Without `-e`, the new cut waits for its enzymes.
@@ -171,6 +172,8 @@ New enzymes on a vector's cut carry over to the PCRs whose tails had the same en
 `copy-out` and `cut-out` take any step of the map's lane, and switch the lane between a cut and a PCR with the same part and enzymes.
 `primers --pair N` keeps pair N of the pairs `protocol run` lists, 1 being the best.
 `--fwd` and `--rev` give two primers of your own, written 5' to 3' with their tails, and `--clear` designs them anew on each run.
+`--tm` sets the melting temperature the design aims for, for the part of each primer that anneals, 60 °C unless set, and designs the primers anew at it, or with `--pair` keeps a pair designed at it.
+`protocol new --pcr --tm 58` sets it from the start.
 `put --into` a map cuts that map with the piece's own enzymes, so the ends match.
 It keeps the map's largest piece as the backbone, takes its 5' phosphates off, and adds a join of the two.
 `--keep-phosphates` leaves the phosphates on.
@@ -217,6 +220,7 @@ A pick's `contains` matches the fragment that carries the most of the named feat
 A digest without enzymes waits for them.
 A PCR without a region waits for it.
 A PCR designs primers for its region anew on each run until `forward_primer` and `reverse_primer` are set, which `protocol primers` does, and then checks them against the region on every run.
+Its `target_tm` is the melting temperature the design aims for, 60 unless set.
 Its JSON lists the `primers` used, each with its sequence, its melting temperature and where it anneals, and the `primer_pairs` designed, best first.
 Each tail is six spare bases and the enzyme's site, so the enzyme can cut near the end of the product.
 A PCR product carries no 5' phosphates, as primers are made without them, and the cut that trims its tails leaves phosphates on the piece kept.

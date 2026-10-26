@@ -26,7 +26,7 @@ mkdir -p docs/images
     wait 1.2
     click 508,345        # the GFP gene on the map
     wait 1.5
-    click 749,21         # Clone, in the top bar
+    click 670,21         # Clone, in the top bar
     wait 2.5
     click 373,385        # the cut of pGFP, which zooms into its map
     wait 2.2
@@ -50,7 +50,7 @@ mkdir -p docs/images
     wait 1.2
     click 508,400        # the mCherry gene on the map
     wait 1.5
-    click 749,21         # Clone, in the top bar
+    click 670,21         # Clone, in the top bar
     wait 2.5
     click 442,303        # the menu of the pCherry cut
     wait 1.5
@@ -58,11 +58,11 @@ mkdir -p docs/images
     wait 2.5
     click 373,385        # the Copy card, which zooms into the map with the primers
     wait 2.5
-    click 615,593        # EcoRI for the forward primer's tail
+    click 626,593        # EcoRI for the forward primer's tail
     wait 2.0
-    scroll 900,450,300   # the panel, down to the reverse primer's enzymes
+    scroll 900,150,300   # the panel, down to the reverse primer's enzymes
     wait 1.0
-    click 545,584        # BamHI for the reverse primer's tail
+    click 543,584        # BamHI for the reverse primer's tail
     wait 2.5
     key Escape           # back to the bench
     wait 2.5

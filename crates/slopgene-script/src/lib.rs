@@ -673,16 +673,18 @@ fn register_protocols(engine: &mut Engine) {
     engine.register_fn("protocol_cut_out", |path: &str, step: &str| -> R<Dynamic> { change_protocol(path, Change::CutOut { step: step.into() }) });
     engine.register_fn("protocol_primers", |path: &str, step: &str, options: Map| -> R<Dynamic> {
         // A pair number keeps one of the pairs the run designs, forward and reverse give two
-        // primers of one's own, and clear designs them anew.
+        // primers of one's own, tm aims the design at a melting temperature, and clear designs
+        // them anew.
         let pair = match options.get("pair").filter(|v| !v.is_unit()) {
             Some(value) => Some(usize_of(value.as_int().map_err(|_| "pair must be a number")?, "pair")?),
             None => None,
         };
         let (forward, reverse) = (text_option(&options, "forward"), text_option(&options, "reverse"));
-        if pair.is_none() && forward.is_none() && reverse.is_none() && !flag_option(&options, "clear") {
-            return Err("say what to do with the primers: pair, forward and reverse, or clear: true".into());
+        let tm = number_option(&options, "tm")?;
+        if pair.is_none() && forward.is_none() && reverse.is_none() && tm.is_none() && !flag_option(&options, "clear") {
+            return Err("say what to do with the primers: pair, forward and reverse, tm, or clear: true".into());
         }
-        change_protocol(path, Change::Primers { step: step.into(), pair, forward, reverse })
+        change_protocol(path, Change::Primers { step: step.into(), pair, forward, reverse, tm })
     });
 }
 
@@ -723,9 +725,17 @@ fn flag_option(options: &Map, key: &str) -> bool {
     options.get(key).and_then(|v| v.as_bool().ok()).unwrap_or(false)
 }
 
+/// Option `key` of an options map as a number, or none when the map lacks it.
+fn number_option(options: &Map, key: &str) -> R<Option<f64>> {
+    match options.get(key).filter(|v| !v.is_unit()) {
+        None => Ok(None),
+        Some(value) => value.as_float().or_else(|_| value.as_int().map(|n| n as f64)).map(Some).map_err(|_| format!("{key} must be a number").into()),
+    }
+}
+
 /// Write a new restriction-cloning protocol file and run it. Options: `enzymes`,
-/// `vector_enzymes`, `cut_out`, `replace`, `name`, `keep_phosphates`, `pcr` and `force`, as for
-/// `slopgene protocol new`.
+/// `vector_enzymes`, `cut_out`, `replace`, `name`, `keep_phosphates`, `pcr`, `tm` and `force`, as
+/// for `slopgene protocol new`.
 fn protocol_new(path: &str, vector: &str, insert: &str, options: Map) -> R<Dynamic> {
     let new = NewFile {
         vector: vector.into(),
@@ -737,6 +747,7 @@ fn protocol_new(path: &str, vector: &str, insert: &str, options: Map) -> R<Dynam
         name: text_option(&options, "name"),
         dephosphorylate: !flag_option(&options, "keep_phosphates"),
         pcr: flag_option(&options, "pcr"),
+        tm: number_option(&options, "tm")?,
     };
     let path = PathBuf::from(path);
     let (plan, ran) = core(protocol::write_new(&path, &new, flag_option(&options, "force"), db()))?;
@@ -918,10 +929,11 @@ mod tests {
             let kept = protocol_primers(file, "pcr_donor", #{{ pair: 2 }});
             let own = protocol_primers(file, "pcr_donor", #{{ forward: copy.primers[0].sequence, reverse: copy.primers[1].sequence }});
             let anew = protocol_primers(file, "pcr_donor", #{{ clear: true }});
+            let aimed = protocol_primers(file, "pcr_donor", #{{ tm: 56 }});
             let back = protocol_cut_out(file, "donor");
             let again = protocol_copy_out(file, "donor");
             let added = protocol_add(file, `${{dir}}/donor.gb`, #{{ cut_out: "geneX", enzymes: "EcoRI,BamHI", pcr: true }});
-            [copy.type, copy.primers.len(), copy.primer_pairs[0].pair, kept.changed.sub_string(0, 29), own.changed, anew.changed, back.changed, again.changed, added.changed, made.steps[made.steps.len() - 1].status]
+            [copy.type, copy.primers.len(), copy.primer_pairs[0].pair, kept.changed.sub_string(0, 29), own.changed, anew.changed, aimed.changed, back.changed, again.changed, added.changed, made.steps[made.steps.len() - 1].status]
             "#,
             dir = folder.to_string_lossy().replace('\\', "/"),
         );
@@ -936,6 +948,7 @@ mod tests {
                 "pcr_donor keeps primer pair 2",
                 "pcr_donor uses the primers given",
                 "pcr_donor designs its primers anew",
+                "pcr_donor designs its primers anew, aiming at a Tm of 56.0 °C",
                 "cut_pcr cuts the part out of donor again, without a PCR",
                 "pcr_donor copies the part out of donor by PCR, and cut_pcr trims its tails",
                 "added donor as donor_2, copied out by PCR; insert_2 keeps its piece",

@@ -116,6 +116,8 @@ pub struct CloningPlan<'a> {
     pub keep_phosphates: bool,
     /// Copy the insert out by PCR, with the enzymes' sites on the primers, rather than cut it out.
     pub pcr: bool,
+    /// With `pcr`, the melting temperature the primer design aims for.
+    pub tm: Option<f64>,
     pub force: bool,
 }
 
@@ -137,6 +139,7 @@ pub fn new_cloning(plan: &CloningPlan) -> Result<Output> {
         name: plan.name.map(str::to_string),
         dephosphorylate: !plan.keep_phosphates,
         pcr: plan.pcr,
+        tm: plan.tm,
     };
     let (protocol, ran) = protocol::write_new(&path, &new, true, enzyme_db())?;
     let mut output = report(&path, &protocol, &ran, &[], None, false);

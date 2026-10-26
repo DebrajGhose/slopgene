@@ -52,10 +52,13 @@ pub struct DesignOptions {
     pub count: usize,
 }
 
+/// The melting temperature a design aims for unless told another, in degrees Celsius.
+pub const DEFAULT_TARGET_TM: f64 = 60.0;
+
 impl Default for DesignOptions {
     fn default() -> Self {
         DesignOptions {
-            target_tm: 60.0,
+            target_tm: DEFAULT_TARGET_TM,
             min_len: 18,
             max_len: 30,
             flank: 0,
@@ -123,7 +126,7 @@ impl PrimerPair {
     pub fn primers(&self, name: &str, seq_len: usize) -> (Primer, Primer) {
         let (start, end) = self.amplified.to_1based(seq_len);
         let describe = |c: &Candidate| {
-            let mut text = format!("anneals {} nt, Tm {:.1} C", c.annealing().len(), c.tm);
+            let mut text = format!("anneals {} nt, Tm {:.1} °C", c.annealing().len(), c.tm);
             if c.tail_len > 0 {
                 text.push_str(&format!(", {}-nt 5' tail", c.tail_len));
             }

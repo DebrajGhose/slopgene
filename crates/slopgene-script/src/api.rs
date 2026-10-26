@@ -146,7 +146,7 @@ pub const API: &[ApiEntry] = &[
     entry(
         PROTOCOLS,
         "protocol_new(path, vector, insert, options) -> map",
-        "The same, with the options enzymes, vector_enzymes, cut_out, replace, name, keep_phosphates, pcr (copy the insert out by PCR) and force.",
+        "The same, with the options enzymes, vector_enzymes, cut_out, replace, name, keep_phosphates, pcr (copy the insert out by PCR), tm (the melting temperature its primer design aims for) and force.",
     ),
     entry(PROTOCOLS, "protocol_add(path, map) -> map", "Add a map to cut a piece from. Its cut waits for a part and enzymes."),
     entry(PROTOCOLS, "protocol_add(path, map, options) -> map", "The same, with the options cut_out (the part), enzymes and pcr (copy the part out by PCR)."),
@@ -171,7 +171,7 @@ pub const API: &[ApiEntry] = &[
     entry(
         PROTOCOLS,
         "protocol_primers(path, step, options) -> map",
-        "The primers of a PCR step: pair keeps pair N of those the run designs, forward and reverse give your own, and clear: true designs them anew.",
+        "The primers of a PCR step: pair keeps pair N of those the run designs, forward and reverse give your own, tm aims the design at a melting temperature, and clear: true designs them anew.",
     ),
     entry(SEQUENCES, "revcomp(seq) -> string", "The reverse complement."),
     entry(SEQUENCES, "complement(seq) -> string", "The complement, in the same direction."),

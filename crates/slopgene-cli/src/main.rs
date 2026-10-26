@@ -526,6 +526,10 @@ enum ProtocolCommand {
         /// rather than cut it out. The cut of the PCR product then trims the tails.
         #[arg(long)]
         pcr: bool,
+        /// With --pcr, the melting temperature the primer design aims for, for the part of each
+        /// primer that anneals (40 to 80, 60 unless set).
+        #[arg(long, requires = "pcr")]
+        tm: Option<f64>,
         /// Replace the protocol file if it exists.
         #[arg(long)]
         force: bool,
@@ -679,6 +683,10 @@ enum ProtocolCommand {
         /// Forget the kept primers, so the run designs them anew.
         #[arg(long)]
         clear: bool,
+        /// The melting temperature the design aims for, for the part of each primer that anneals
+        /// (40 to 80, 60 unless set). The primers are designed anew at it, unless --pair keeps one.
+        #[arg(long, conflicts_with_all = ["fwd", "rev"])]
+        tm: Option<f64>,
     },
 }
 
@@ -881,9 +889,10 @@ fn run(command: Command) -> anyhow::Result<Output> {
         }),
         Command::Protocol { action } => match action {
             ProtocolCommand::Run { path, choose, save, out_dir } => protocol_cmd::run(&path, &choose, save, out_dir.as_deref()),
-            ProtocolCommand::New { path, vector, insert, enzymes, vector_enzymes, cut_out, replace, name, keep_phosphates, pcr, force } => {
+            ProtocolCommand::New { path, vector, insert, enzymes, vector_enzymes, cut_out, replace, name, keep_phosphates, pcr, tm, force } => {
                 protocol_cmd::new_cloning(&protocol_cmd::CloningPlan {
                     path: &path,
+                    tm,
                     vector: &vector,
                     insert: &insert,
                     enzymes: enzymes.as_deref(),
@@ -920,11 +929,11 @@ fn run(command: Command) -> anyhow::Result<Output> {
             }
             ProtocolCommand::CopyOut { path, step } => protocol_cmd::change(&path, Change::CopyOut { step }),
             ProtocolCommand::CutOut { path, step } => protocol_cmd::change(&path, Change::CutOut { step }),
-            ProtocolCommand::Primers { path, step, pair, fwd, rev, clear } => {
-                if pair.is_none() && fwd.is_none() && !clear {
-                    anyhow::bail!("say what to do with the primers: --pair N, --fwd and --rev, or --clear");
+            ProtocolCommand::Primers { path, step, pair, fwd, rev, clear, tm } => {
+                if pair.is_none() && fwd.is_none() && !clear && tm.is_none() {
+                    anyhow::bail!("say what to do with the primers: --pair N, --fwd and --rev, --tm T, or --clear");
                 }
-                protocol_cmd::change(&path, Change::Primers { step, pair, forward: fwd, reverse: rev })
+                protocol_cmd::change(&path, Change::Primers { step, pair, forward: fwd, reverse: rev, tm })
             }
         },
         Command::Annotate { files, library, min_identity, min_length, output, in_place, save_library } => {

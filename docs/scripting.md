@@ -345,7 +345,7 @@ print(`${piece.length} bp, ${piece.left.end} / ${piece.right.end}`);
 |---|---|
 | `protocol_run(path) -> map` | Run a protocol file and report every step, as `slopgene protocol run --json` does. |
 | `protocol_new(path, vector, insert) -> map` | Write a protocol that cuts a piece out of the insert's map and puts it into the vector, then run it. |
-| `protocol_new(path, vector, insert, options) -> map` | The same, with the options enzymes, vector_enzymes, cut_out, replace, name, keep_phosphates, pcr (copy the insert out by PCR) and force. |
+| `protocol_new(path, vector, insert, options) -> map` | The same, with the options enzymes, vector_enzymes, cut_out, replace, name, keep_phosphates, pcr (copy the insert out by PCR), tm (the melting temperature its primer design aims for) and force. |
 | `protocol_add(path, map) -> map` | Add a map to cut a piece from. Its cut waits for a part and enzymes. |
 | `protocol_add(path, map, options) -> map` | The same, with the options cut_out (the part), enzymes and pcr (copy the part out by PCR). |
 | `protocol_cut(path, step, options) -> map` | Change a cut's part, its enzymes or both, with the options part and enzymes (`""` clears either). For a PCR step, the part it copies and the enzymes on its primers' tails. |
@@ -358,7 +358,7 @@ print(`${piece.length} bp, ${piece.left.end} / ${piece.right.end}`);
 | `protocol_turn(path, piece, join, way) -> map` | Say which way a piece goes into a join: "forward", "reverse" or "either". |
 | `protocol_copy_out(path, step) -> map` | Copy a map's part out by PCR instead of cutting it out: a PCR step goes between the map and its cut, with the cut's enzymes on the primers' tails. |
 | `protocol_cut_out(path, step) -> map` | Cut a map's part out instead of copying it by PCR, the reverse of `protocol_copy_out`. |
-| `protocol_primers(path, step, options) -> map` | The primers of a PCR step: `pair` keeps pair N of those the run designs, `forward` and `reverse` give your own, and `clear: true` designs them anew. |
+| `protocol_primers(path, step, options) -> map` | The primers of a PCR step: `pair` keeps pair N of those the run designs, `forward` and `reverse` give your own, `tm` aims the design at a melting temperature, and `clear: true` designs them anew. |
 
 These functions make the changes the app's protocol bench makes with the mouse.
 Each one changes the file, writes it back and runs it.
@@ -378,6 +378,7 @@ Its steps are the map, the PCR (`pcr_donor`), the cut that trims the primers' ta
 The PCR's enzymes go on the primers' tails, the forward primer's first, and the cut uses the same enzymes.
 The run reports the PCR's `primers`, each with its sequence and where it anneals, and the `primer_pairs` it designed, best first.
 The primers are designed anew on each run until `protocol_primers` keeps a pair, after which every run checks them against the part.
+`tm` aims the design at a melting temperature for the part of each primer that anneals, 60 °C unless set, and the run reports each primer's own `tm`.
 
 A join's `byproducts` list the other molecules its tube makes, such as the insert the other way round or the backbone closed on itself.
 Each one has a `description` in plain words and the `pieces` it holds in order, each with `turned_round`.
