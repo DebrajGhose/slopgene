@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SlopGene: a free plasmid and sequence editor</title>
+  <meta name="description" content="SlopGene is a free, open-source and scriptable plasmid and sequence editor for Windows, macOS and Linux.">
+  <meta property="og:title" content="SlopGene">
+  <meta property="og:description" content="A free, open-source and scriptable plasmid and sequence editor for Windows, macOS and Linux.">
+  <meta property="og:url" content="https://debrajghose.com/slopgene/">
+  <link rel="icon" href="images/slopgene.svg" type="image/svg+xml">
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f3f4f6;
+      --card: #ffffff;
+      --ink: #222222;
+      --muted: #6b6b6b;
+      --line: #dadde3;
+      --code: #e9ebef;
+      --accent: #515faa;
+      --accent-ink: #ffffff;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #1b1c1f;
+        --card: #26272b;
+        --ink: #e8e8e6;
+        --muted: #9a9a9a;
+        --line: #34353a;
+        --code: #2a2b30;
+        --accent: #8a96e0;
+        --accent-ink: #15161a;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font: 16px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+    main { max-width: 760px; margin: 0 auto; padding: 40px 16px 56px; }
+    header { display: flex; align-items: center; gap: 14px; }
+    header img { width: 52px; height: 52px; }
+    h1 { font-size: 2.1rem; margin: 0; letter-spacing: -0.01em; }
+    h2 { font-size: 1.35rem; margin: 44px 0 10px; }
+    p { margin: 0 0 12px; }
+    a { color: var(--accent); }
+    .tagline { font-size: 1.2rem; margin: 10px 0 22px; max-width: 36em; }
+    .downloads {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(165px, 1fr));
+      gap: 10px;
+      margin: 0 0 12px;
+      padding: 0;
+      list-style: none;
+    }
+    .downloads a {
+      display: block;
+      background: var(--accent);
+      color: var(--accent-ink);
+      text-decoration: none;
+      border-radius: 10px;
+      padding: 12px 14px;
+      line-height: 1.35;
+    }
+    .downloads a:hover { filter: brightness(1.08); }
+    .downloads strong { display: block; font-size: 1.05rem; }
+    .downloads span { display: block; font-size: 0.85rem; opacity: 0.88; margin-top: 2px; }
+    .downloads em { display: block; font-style: normal; font-size: 0.8rem; margin-top: 6px; opacity: 0.95; }
+    .downloads .mine a { box-shadow: 0 0 0 3px var(--bg), 0 0 0 5px var(--accent); }
+    .small { color: var(--muted); font-size: 0.92rem; }
+    figure { margin: 14px 0 22px; }
+    figure img {
+      display: block;
+      width: 100%;
+      height: auto;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--card);
+    }
+    figcaption { font-size: 0.92rem; color: var(--muted); margin-top: 8px; }
+    ul.plain { padding-left: 1.2em; margin: 0 0 12px; }
+    ul.plain li { margin-bottom: 4px; }
+    code, pre { font-family: ui-monospace, "JetBrains Mono", Consolas, "SF Mono", Menlo, monospace; font-size: 0.9em; }
+    code { background: var(--code); padding: 1px 5px; border-radius: 4px; }
+    pre { background: var(--code); padding: 12px 14px; border-radius: 10px; overflow-x: auto; margin: 0 0 12px; }
+    pre code { background: none; padding: 0; }
+    footer { margin-top: 44px; padding-top: 18px; border-top: 1px solid var(--line); color: var(--muted); font-size: 0.92rem; }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <img src="images/slopgene.svg" alt="">
+    <h1>SlopGene</h1>
+  </header>
+  <p class="tagline">A free, open-source and scriptable plasmid and sequence editor for Windows, macOS and Linux.</p>
+
+  <ul class="downloads" id="downloads">
+    <li data-os="windows"><a href="https://github.com/DebrajGhose/slopgene/releases/latest/download/SlopGene-windows-setup.exe"><strong>Windows</strong><span>setup program, .exe</span></a></li>
+    <li data-os="macos"><a href="https://github.com/DebrajGhose/slopgene/releases/latest/download/SlopGene-macos.dmg"><strong>macOS</strong><span>disk image, .dmg</span></a></li>
+    <li data-os="linux"><a href="https://github.com/DebrajGhose/slopgene/releases/latest/download/SlopGene-linux.deb"><strong>Linux</strong><span>Debian and Ubuntu, .deb</span></a></li>
+    <li data-os="linux"><a href="https://github.com/DebrajGhose/slopgene/releases/latest/download/SlopGene-linux.AppImage"><strong>Linux</strong><span>other distributions, AppImage</span></a></li>
+  </ul>
+  <p class="small" id="latest">Each download installs the desktop app and the <code>slopgene</code> command line.</p>
+  <p class="small">The installers are not code-signed, so Windows and macOS warn before the first start, and <a href="https://github.com/DebrajGhose/slopgene#the-first-start">the README says which button to press</a>. Older versions, the plain archives and the checksums are on the <a href="https://github.com/DebrajGhose/slopgene/releases">releases page</a>.</p>
+
+  <h2>See it work</h2>
+  <p>Cutting GFP out of one plasmid and putting it into another. Click the gene on the map, press Clone, and the protocol opens as a bench. A click on a card zooms into it, where the enzymes that cut nearest the part are picked, and the join shows the new plasmid with its bases underneath.</p>
+  <figure>
+    <img src="images/clone-by-cutting.gif" alt="Cutting GFP out of pGFP and putting it into pDoom, step by step on the bench" width="1000" height="760" loading="lazy">
+  </figure>
+  <p>Copying a part out by PCR instead, when no enzyme cuts near it. The primers are designed for the part, and the enzymes chosen go on their tails, so the copy has the same sticky ends as the opened vector.</p>
+  <figure>
+    <img src="images/clone-by-pcr.gif" alt="Copying mCherry out of pCherry by PCR with EcoRI and BamHI tails, and putting it into pDoom" width="1000" height="760" loading="lazy">
+    <figcaption>The plasmids in these animations are made up. They are in the repository under <a href="https://github.com/DebrajGhose/slopgene/tree/main/examples/maps">examples/maps</a>, to try the same steps with.</figcaption>
+  </figure>
+
+  <h2>What it does</h2>
+  <ul class="plain">
+    <li>Opens and saves <code>.dna</code>, GenBank and FASTA files, and draws circular and linear maps.</li>
+    <li>Edits sequences, features and primers, with undo, and finds the sites of 581 commercial enzymes.</li>
+    <li>Designs primers and simulates PCR, digests, restriction cloning, Gibson assembly and Golden Gate.</li>
+    <li>Builds a cloning construct step by step on a bench, with every junction checked.</li>
+    <li>Aligns sequencing reads to a map and shows every change, down to its effect on the protein.</li>
+    <li>Does all of it from the command line and from scripts too, with JSON output for pipelines and AI agents.</li>
+  </ul>
+  <pre><code>slopgene sites pUC19.dna --unique
+slopgene digest pUC19.dna -e EcoRI,PvuII --gel gel.png
+slopgene verify "sequencing/*.gbk" --refs maps/
+slopgene excise donor.dna --feature GFP --vector pUC19.dna --json</code></pre>
+  <p>The <a href="https://github.com/DebrajGhose/slopgene#readme">README on GitHub</a> has the full list of functions, the keyboard shortcuts, the scripting guide and the source code.</p>
+
+  <footer>
+    <p>SlopGene is written by Claude and Debraj Ghose. It is free under the MIT or Apache 2.0 licence, and it was built with support from the AI for Science program of Anthropic.</p>
+    <p>SlopGene reads and writes the <code>.dna</code> files of SnapGene, as a clean-room reimplementation of the format. SnapGene is a trademark of Dotmatics, and SlopGene is not affiliated with either.</p>
+  </footer>
+</main>
+<script>
+  (function () {
+    // Put the download for the visitor's own system first and mark it.
+    var ua = navigator.userAgent || "";
+    var os = "";
+    if (/Windows/i.test(ua)) { os = "windows"; }
+    else if (/Macintosh|Mac OS X/i.test(ua)) { os = "macos"; }
+    else if (/Linux/i.test(ua) && !/Android/i.test(ua)) { os = "linux"; }
+    var list = document.getElementById("downloads");
+    if (os && list) {
+      var mine = Array.prototype.slice.call(list.querySelectorAll("li[data-os=" + os + "]"));
+      mine.reverse().forEach(function (item) {
+        item.classList.add("mine");
+        var tag = document.createElement("em");
+        tag.textContent = "for this computer";
+        item.querySelector("a").appendChild(tag);
+        list.insertBefore(item, list.firstChild);
+      });
+    }
+    // Say which version the buttons fetch, when GitHub answers.
+    var latest = document.getElementById("latest");
+    if (latest && window.fetch) {
+      fetch("https://api.github.com/repos/DebrajGhose/slopgene/releases/latest")
+        .then(function (response) { return response.ok ? response.json() : null; })
+        .then(function (release) {
+          if (!release || !release.tag_name) { return; }
+          var version = String(release.tag_name).replace(/^v/, "");
+          var when = release.published_at ? new Date(release.published_at) : null;
+          var text = "The newest version is " + version;
+          if (when && !isNaN(when)) {
+            text += ", released " + when.toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" });
+          }
+          latest.textContent = text + ". " + latest.textContent;
+        })
+        .catch(function () {});
+    }
+  })();
+</script>
+</body>
+</html>

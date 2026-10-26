@@ -96,6 +96,9 @@ The README's download buttons and the app's update check read that release, so p
 Starting the workflow by hand from the Actions tab builds the same files as downloadable artifacts and makes no release.
 The comments in `crates/slopgene-gui/Cargo.toml` show how to build each installer on your own computer.
 
+GitHub Pages serves the `docs` folder as the project's website.
+`docs/index.html` is its one page, with the same download buttons as the README, and `docs/.nojekyll` keeps GitHub from running Jekyll over the folder.
+
 ## Licence
 
 SlopGene is licensed under either the MIT licence ([LICENSE-MIT](LICENSE-MIT)) or the Apache License 2.0 ([LICENSE-APACHE](LICENSE-APACHE)), at your option.

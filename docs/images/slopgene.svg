@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!-- The SlopGene app icon: a plasmid map in the app's own colours. The plate is the interface
+       accent (indigo) and the ring is the backbone. The two arrows and the block are features
+       in the map palette (gold, jade and cyan). `examples/make_icons.rs` renders this file into
+       the PNG, ICO and ICNS files beside it. -->
+  <defs>
+    <linearGradient id="plate" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#5B69B6"/>
+      <stop offset="1" stop-color="#48559C"/>
+    </linearGradient>
+  </defs>
+  <rect x="64" y="64" width="896" height="896" rx="208" fill="url(#plate)"/>
+  <circle cx="512" cy="512" r="272" fill="none" stroke="#F4F4F1" stroke-width="56"/>
+  <path fill="#FFC339" stroke="#3D4889" stroke-width="10" stroke-linejoin="round"
+        d="M 663.2 227.7 A 322 322 0 0 1 829.1 567.9 L 864.6 574.2 L 756.9 689.2 L 695.2 544.3 L 730.6 550.5 A 222 222 0 0 0 616.2 316.0 Z"/>
+  <path fill="#4BBD94" stroke="#3D4889" stroke-width="10" stroke-linejoin="round"
+        d="M 205.8 611.5 A 322 322 0 0 0 370.8 801.4 L 355.1 833.8 L 511.4 814.3 L 430.5 679.2 L 414.7 711.5 A 222 222 0 0 1 300.9 580.6 Z"/>
+  <path fill="#0BB0D5" stroke="#3D4889" stroke-width="10" stroke-linejoin="round"
+        d="M 227.7 360.8 A 322 322 0 0 1 370.8 222.6 L 414.7 312.5 A 222 222 0 0 0 316.0 407.8 Z"/>
+</svg>
