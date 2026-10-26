@@ -1524,7 +1524,8 @@ impl eframe::App for SlopGeneApp {
             Front::Protocol(ii) => self.protocols.get(ii).map(|t| t.title()),
             Front::Document => self.tabs.get(self.active).map(|t| t.title()),
         };
-        let title = title.map(|t| format!("{t} · SlopGene")).unwrap_or_else(|| "SlopGene".to_string());
+        let version = env!("CARGO_PKG_VERSION");
+        let title = title.map(|t| format!("{t} · SlopGene {version}")).unwrap_or_else(|| format!("SlopGene {version}"));
         ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
 
         // The cursor of a played script, or of a `--drag`, drawn over everything. A script keeps
@@ -1621,7 +1622,8 @@ impl SlopGeneApp {
             ui,
             |ui| {
                 ui.horizontal_centered(|ui| {
-                    ui.label(RichText::new("SlopGene").font(style::bold_font(14.0)).color(palette.accent));
+                    ui.label(RichText::new("SlopGene").font(style::bold_font(14.0)).color(palette.accent))
+                        .on_hover_text(format!("SlopGene {}", env!("CARGO_PKG_VERSION")));
                     ui.add_space(10.0);
                     // Tabs: the documents, then the protocols, which are set in italics.
                     let mut close = None;
@@ -1680,13 +1682,17 @@ impl SlopGeneApp {
                         if ui.small_button(format!("Commands  {shortcut}")).clicked() {
                             actions.push(Action::Palette);
                         }
-                        // A newer version, once the check has found one.
-                        if let Some(version) = self.updater.available() {
-                            ui.add_space(4.0);
-                            let label = RichText::new(format!("Update to {version}")).color(palette.accent);
-                            if ui.small_button(label).on_hover_text("A newer version of SlopGene is released. Download and install it.").clicked() {
-                                actions.push(Action::Update);
+                        // Update is always there. It takes the accent colour once the check has
+                        // found a newer version, and its dialog says the rest.
+                        ui.add_space(4.0);
+                        let (label, hint) = match self.updater.available() {
+                            Some(version) => {
+                                (RichText::new("Update").color(palette.accent), format!("SlopGene {version} is released. Download and install it."))
                             }
+                            None => (RichText::new("Update"), format!("Look for a newer version of SlopGene. You have {}.", env!("CARGO_PKG_VERSION"))),
+                        };
+                        if ui.small_button(label).on_hover_text(hint).clicked() {
+                            actions.push(Action::Update);
                         }
                         // The tools sit apart from the views: Clone, then Align to its left.
                         // Clone starts a cloning protocol whatever tab is in front.

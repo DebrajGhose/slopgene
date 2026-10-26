@@ -127,7 +127,7 @@ fn main() -> eframe::Result<()> {
     // Linux desktops match a window to its launcher, and so to the launcher's icon, by this id.
     // The installers name the launcher slopgene-gui.desktop.
     let mut viewport = egui::ViewportBuilder::default()
-        .with_title("SlopGene")
+        .with_title(concat!("SlopGene ", env!("CARGO_PKG_VERSION")))
         .with_app_id("slopgene-gui")
         .with_inner_size(size)
         .with_min_inner_size([760.0, 480.0])

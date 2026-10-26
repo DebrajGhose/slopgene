@@ -248,6 +248,14 @@ impl Updater {
                         close = true;
                     }
                 }
+                Stage::UpToDate => {
+                    if ui.button("Check again").clicked() {
+                        again = true;
+                    }
+                    if ui.button("Close").clicked() {
+                        close = true;
+                    }
+                }
                 _ => {
                     if ui.button("Close").clicked() {
                         close = true;
