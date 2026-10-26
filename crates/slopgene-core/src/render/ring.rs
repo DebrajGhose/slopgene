@@ -22,9 +22,9 @@ use std::f32::consts::TAU;
 pub enum Role {
     /// Bases that go on into the product: green.
     Kept,
-    /// Bases left over: red.
+    /// Bases left over: pale grey.
     LeftOver,
-    /// Nothing decided yet: grey.
+    /// Nothing decided yet: the backbone's grey.
     Plain,
 }
 

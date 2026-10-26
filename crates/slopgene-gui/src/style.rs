@@ -1,6 +1,6 @@
 //! Look and feel: fonts, colours and spacing.
 //!
-//! The aim is a quiet interface: one neutral background, hairline separators, a single accent
+//! The aim is a quiet interface: one neutral grey background without a warm tint, hairline separators, a single accent
 //! colour (indigo from the user's figure palette), Inter for the interface and JetBrains Mono for
 //! sequence. Both fonts are bundled (SIL Open Font License, see `assets/fonts`), so the app looks
 //! the same on every system.
@@ -95,13 +95,13 @@ impl Palette {
     pub fn light() -> Palette {
         Palette {
             dark: false,
-            canvas: Color32::from_rgb(0xFC, 0xFC, 0xFB),
-            panel: Color32::from_rgb(0xF6, 0xF6, 0xF4),
+            canvas: Color32::from_rgb(0xF6, 0xF7, 0xF9),
+            panel: Color32::from_rgb(0xEF, 0xF1, 0xF4),
             raised: Color32::from_rgb(0xFF, 0xFF, 0xFF),
-            line: Color32::from_rgb(0xE4, 0xE4, 0xE0),
+            line: Color32::from_rgb(0xDA, 0xDD, 0xE3),
             ink: Color32::from_rgb(0x22, 0x22, 0x22),
             muted: Color32::from_rgb(0x6B, 0x6B, 0x6B),
-            faint: Color32::from_rgb(0xA8, 0xA8, 0xA4),
+            faint: Color32::from_rgb(0xA0, 0xA4, 0xAB),
             accent: Color32::from_rgb(0x51, 0x5F, 0xAA),
             accent_soft: Color32::from_rgba_unmultiplied(0x51, 0x5F, 0xAA, 46),
             warn: Color32::from_rgb(0xB0, 0x6A, 0x00),
@@ -140,10 +140,10 @@ pub fn apply(ctx: &egui::Context, dark: bool) {
     v.panel_fill = p.panel;
     v.window_fill = p.raised;
     v.extreme_bg_color = p.raised;
-    v.faint_bg_color = if dark { Color32::from_rgb(0x26, 0x27, 0x2B) } else { Color32::from_rgb(0xF0, 0xF0, 0xED) };
+    v.faint_bg_color = if dark { Color32::from_rgb(0x26, 0x27, 0x2B) } else { Color32::from_rgb(0xE7, 0xE9, 0xEE) };
     v.code_bg_color = v.faint_bg_color;
     // Text fields need a fill that differs from both panels and windows to stay visible.
-    v.text_edit_bg_color = Some(if dark { Color32::from_rgb(0x1E, 0x1F, 0x23) } else { Color32::from_rgb(0xF1, 0xF1, 0xEE) });
+    v.text_edit_bg_color = Some(if dark { Color32::from_rgb(0x1E, 0x1F, 0x23) } else { Color32::from_rgb(0xE9, 0xEB, 0xEF) });
     v.window_stroke = Stroke::new(1.0, p.line);
     v.window_corner_radius = CornerRadius::same(10);
     v.menu_corner_radius = CornerRadius::same(8);
@@ -162,9 +162,9 @@ pub fn apply(ctx: &egui::Context, dark: bool) {
     w.noninteractive.bg_stroke = Stroke::new(1.0, p.line);
     w.noninteractive.fg_stroke = Stroke::new(1.0, p.ink);
     w.noninteractive.corner_radius = radius;
-    let button = if dark { Color32::from_rgb(0x2E, 0x2F, 0x34) } else { Color32::from_rgb(0xEC, 0xEC, 0xE9) };
-    let button_hover = if dark { Color32::from_rgb(0x38, 0x39, 0x3F) } else { Color32::from_rgb(0xE3, 0xE3, 0xDF) };
-    let button_active = if dark { Color32::from_rgb(0x42, 0x43, 0x4A) } else { Color32::from_rgb(0xD9, 0xD9, 0xD5) };
+    let button = if dark { Color32::from_rgb(0x2E, 0x2F, 0x34) } else { Color32::from_rgb(0xE2, 0xE5, 0xEA) };
+    let button_hover = if dark { Color32::from_rgb(0x38, 0x39, 0x3F) } else { Color32::from_rgb(0xD8, 0xDC, 0xE2) };
+    let button_active = if dark { Color32::from_rgb(0x42, 0x43, 0x4A) } else { Color32::from_rgb(0xCD, 0xD2, 0xD9) };
     for (state, fill) in [(&mut w.inactive, button), (&mut w.hovered, button_hover), (&mut w.active, button_active), (&mut w.open, button_hover)] {
         state.bg_fill = fill;
         state.weak_bg_fill = fill;

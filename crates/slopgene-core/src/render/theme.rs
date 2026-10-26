@@ -36,13 +36,14 @@ pub const INSERTED: Rgba = Rgba::rgb(0x8E, 0x44, 0xAD);
 /// Reference bases the aligned sequence lacks.
 pub const MISSING: Rgba = Rgba::rgb(0xD6, 0x27, 0x28);
 
-// Colours for the pieces of a cloning protocol, as the user sketched them: green for the bases
-// that go on into the product and red for the bases left over. Like the comparison colours they
-// lie outside the categorical palette, which stands for feature types.
+// Colours for the pieces of a cloning protocol: green for the bases that go on into the product
+// and a pale grey for the bases left over, so the eye goes to what is kept. The green lies outside
+// the categorical palette, which stands for feature types, and the grey is paler than the backbone
+// grey of a ring that has no cut yet, so an undecided ring and a left-over piece look different.
 /// Bases that go on into the product.
 pub const KEPT: Rgba = Rgba::rgb(0x2E, 0x9E, 0x5B);
 /// Bases left over: the rest of a donor, or the part of a vector an insert replaces.
-pub const LEFT_OVER: Rgba = Rgba::rgb(0xD6, 0x27, 0x28);
+pub const LEFT_OVER: Rgba = Rgba::rgb(0xB8, 0xBC, 0xC3);
 
 /// Colours for one appearance (light or dark).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -75,10 +76,10 @@ impl Theme {
     pub fn light() -> Theme {
         Theme {
             dark: false,
-            background: Rgba::rgb(0xFC, 0xFC, 0xFB),
+            background: Rgba::rgb(0xFA, 0xFA, 0xFA),
             ink: INK,
             muted: Rgba::rgb(0x6B, 0x6B, 0x6B),
-            faint: Rgba::rgb(0xDD, 0xDD, 0xDA),
+            faint: Rgba::rgb(0xDC, 0xDD, 0xE0),
             backbone: Rgba::rgb(0x8A, 0x8A, 0x8A),
             enzyme: Rgba::rgb(0x44, 0x44, 0x44),
             primer: TEAL,
@@ -111,7 +112,8 @@ impl Theme {
             inserted: Rgba::rgb(0xB7, 0x7D, 0xD6),
             missing: Rgba::rgb(0xF0, 0x5A, 0x5B),
             kept: Rgba::rgb(0x5C, 0xC8, 0x82),
-            left_over: Rgba::rgb(0xF0, 0x5A, 0x5B),
+            // Darker than the backbone grey, which is the dark theme's way of fading a piece out.
+            left_over: Rgba::rgb(0x5E, 0x60, 0x66),
         }
     }
 }

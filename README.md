@@ -221,7 +221,7 @@ The protocol opens in a tab of its own, laid out as a bench.
 Each plasmid heads a column as a small ring.
 The part being worked on is turned to the top of its ring.
 Under each plasmid sits its cut, where the ring breaks at the cuts and the pieces pull away from it.
-Green pieces go on into the new plasmid, and red pieces are left over.
+Green pieces go on into the new plasmid, and grey pieces are left over.
 Arrows carry the kept pieces down to the join, which draws the new plasmid.
 Each card says what its step does: Start, Cut, Copy or Join.
 A dephosphorylation rides on its arrow as a label.

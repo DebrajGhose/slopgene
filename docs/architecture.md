@@ -121,7 +121,7 @@ Shapes carry a tag naming the feature, enzyme or primer they draw.
 Label placement spreads crowded labels into columns and draws leader lines to their features.
 A circular map can turn a chosen base to 12 o'clock (`MapOptions::top`).
 `render/ring.rs` draws the small rings of the protocol bench.
-A ring is a thick circle in the colours of its stretches: green where bases go on into the product, red where they are left over, and grey where nothing is decided.
+A ring is a thick circle in the colours of its stretches: green where bases go on into the product, pale grey where they are left over, and the backbone's darker grey where nothing is decided.
 A cut ring breaks into its pieces, and a piece can lift away from the centre.
 A ring's radius is a fixed share of its canvas, so the app can grow a ring into a full map of the same size.
 

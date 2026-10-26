@@ -2,7 +2,7 @@
 //!
 //! Each map the protocol starts from heads a column, drawn as a small ring. Under it sits its
 //! cut: the same ring broken where the enzymes cut, with the pieces pulled apart. Green pieces go
-//! on into the product and red pieces are left over. Arrows carry the kept pieces down to the
+//! on into the product and grey pieces are left over. Arrows carry the kept pieces down to the
 //! join, which draws the new plasmid. The whole protocol is on the one bench. A map whose part is
 //! copied out by PCR has a PCR card between it and its cut, which draws the product as a bar: the
 //! copy in green with the primers' tails in grey, which the cut then trims off.
@@ -2905,7 +2905,7 @@ fn detail(
         Kind::Plasmid if map_cut.is_none() => "This plasmid is not cut yet. On the bench, drag a green piece onto it to put the piece in.",
         Kind::Plasmid | Kind::Copy => marking,
         Kind::Cut if unpieced && board.before(card).is_some() => marking,
-        Kind::Cut => "Green pieces go on into the new plasmid. Red pieces are left over. Click a piece to keep it instead.",
+        Kind::Cut => "Green pieces go on into the new plasmid. Grey pieces are left over. Click a piece to keep it instead.",
         Kind::Join if waits && others => {
             "The insert fits either way round. The arrowheads show which way each gene reads. Choose the plasmid you want. The grey plasmids on the right form in the same tube."
         }
@@ -4047,7 +4047,7 @@ fn piece_rows(ui: &mut egui::Ui, tab: &ProtocolTab, board: &Board, card: usize, 
         ui.horizontal(|ui| {
             let (word, color) = match role {
                 Role::Kept => ("kept", palette.ok),
-                Role::LeftOver => ("left over", palette.error),
+                Role::LeftOver => ("left over", palette.muted),
                 Role::Plain => ("not chosen", palette.warn),
             };
             ui.label(RichText::new(format!("{} bp", thousands(piece.doc.len()))).font(style::bold_font(12.5)).color(palette.ink));

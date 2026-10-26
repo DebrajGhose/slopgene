@@ -127,7 +127,7 @@ pub fn render_gel(lanes: &[Lane], options: &GelOptions) -> Scene {
     let gel_h = options.height;
     let width = left + lanes.len() as f32 * (options.lane_width + gap) + gap + 16.0;
     let height = top + gel_h + font * 2.0;
-    let page = Rgba::rgb(0xFC, 0xFC, 0xFB);
+    let page = Rgba::rgb(0xFA, 0xFA, 0xFA);
     let gel = Rgba::rgb(0x1E, 0x21, 0x27);
     let glow = Rgba::rgb(0xF2, 0xF6, 0xFF);
     let ink = Rgba::rgb(0x22, 0x22, 0x22);
