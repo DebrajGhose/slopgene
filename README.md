@@ -1,7 +1,8 @@
 # SlopGene
 
-SlopGene is a free, open-source plasmid and sequence editor for Windows, macOS and Linux.
+SlopGene is a free, open-source and scriptable plasmid and sequence editor for Windows, macOS and Linux.
 It draws plasmid maps, edits sequences, finds enzyme sites, designs primers, simulates PCR and digests, checks sequencing results, and builds cloning constructs step by step on a bench.
+Everything the desktop app does, the `slopgene` command line and its scripts do too, with JSON output for pipelines and AI agents.
 
 ## Download
 
