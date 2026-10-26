@@ -102,7 +102,6 @@
     <li data-os="linux"><a href="https://github.com/DebrajGhose/slopgene/releases/latest/download/SlopGene-linux.AppImage"><strong>Linux</strong><span>other distributions, AppImage</span></a></li>
   </ul>
   <p><a href="https://github.com/DebrajGhose/slopgene">SlopGene on GitHub</a>: source code, documentation and older versions.</p>
-  <p class="small" id="latest">The installers are not signed, so Windows and macOS warn at the first start.</p>
 
   <h2>Sample Workflow</h2>
   <h3>Restriction cloning</h3>
@@ -115,7 +114,7 @@
   </figure>
 
   <h2>Command line and scripts</h2>
-  <p>Everything the app does, the <code>slopgene</code> command line and its scripts do too, with JSON output for pipelines and AI agents.</p>
+  <p>SlopGene also enables powerful automated cloning workflows by exposing everything in the app through the <code>slopgene</code> command line and a scripting language, with JSON output for pipelines and AI agents.</p>
   <pre><code>// The restriction cloning above, as a script. The protocol it writes opens in the app as the bench.
 protocol_new("clone.json", "pDoom.dna", "pGFP.dna", #{ cut_out: "GFP", enzymes: "EcoRI,BamHI" });</code></pre>
   <p class="small">Run it with <code>slopgene run clone.rhai</code>. The <a href="https://github.com/DebrajGhose/slopgene/blob/main/docs/scripting.md">scripting guide</a> lists every function.</p>
@@ -138,23 +137,6 @@ protocol_new("clone.json", "pDoom.dna", "pGFP.dna", #{ cut_out: "GFP", enzymes: 
         item.querySelector("a").appendChild(tag);
         list.insertBefore(item, list.firstChild);
       });
-    }
-    // Say which version the buttons fetch, when GitHub answers.
-    var latest = document.getElementById("latest");
-    if (latest && window.fetch) {
-      fetch("https://api.github.com/repos/DebrajGhose/slopgene/releases/latest")
-        .then(function (response) { return response.ok ? response.json() : null; })
-        .then(function (release) {
-          if (!release || !release.tag_name) { return; }
-          var version = String(release.tag_name).replace(/^v/, "");
-          var when = release.published_at ? new Date(release.published_at) : null;
-          var text = "The newest version is " + version;
-          if (when && !isNaN(when)) {
-            text += ", released " + when.toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" });
-          }
-          latest.textContent = text + ". " + latest.textContent;
-        })
-        .catch(function () {});
     }
   })();
 </script>
