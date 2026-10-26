@@ -45,6 +45,7 @@
     header img { width: 52px; height: 52px; }
     h1 { font-size: 2.1rem; margin: 0; letter-spacing: -0.01em; }
     h2 { font-size: 1.35rem; margin: 44px 0 10px; }
+    h3 { font-size: 1.05rem; margin: 22px 0 8px; }
     p { margin: 0 0 12px; }
     a { color: var(--accent); }
     .tagline { font-size: 1.2rem; margin: 10px 0 22px; max-width: 36em; }
@@ -52,7 +53,7 @@
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(165px, 1fr));
       gap: 10px;
-      margin: 0 0 12px;
+      margin: 0 0 14px;
       padding: 0;
       list-style: none;
     }
@@ -71,7 +72,7 @@
     .downloads em { display: block; font-style: normal; font-size: 0.8rem; margin-top: 6px; opacity: 0.95; }
     .downloads .mine a { box-shadow: 0 0 0 3px var(--bg), 0 0 0 5px var(--accent); }
     .small { color: var(--muted); font-size: 0.92rem; }
-    figure { margin: 14px 0 22px; }
+    figure { margin: 0 0 8px; }
     figure img {
       display: block;
       width: 100%;
@@ -80,14 +81,10 @@
       border-radius: 10px;
       background: var(--card);
     }
-    figcaption { font-size: 0.92rem; color: var(--muted); margin-top: 8px; }
-    ul.plain { padding-left: 1.2em; margin: 0 0 12px; }
-    ul.plain li { margin-bottom: 4px; }
     code, pre { font-family: ui-monospace, "JetBrains Mono", Consolas, "SF Mono", Menlo, monospace; font-size: 0.9em; }
     code { background: var(--code); padding: 1px 5px; border-radius: 4px; }
     pre { background: var(--code); padding: 12px 14px; border-radius: 10px; overflow-x: auto; margin: 0 0 12px; }
     pre code { background: none; padding: 0; }
-    footer { margin-top: 44px; padding-top: 18px; border-top: 1px solid var(--line); color: var(--muted); font-size: 0.92rem; }
   </style>
 </head>
 <body>
@@ -104,39 +101,24 @@
     <li data-os="linux"><a href="https://github.com/DebrajGhose/slopgene/releases/latest/download/SlopGene-linux.deb"><strong>Linux</strong><span>Debian and Ubuntu, .deb</span></a></li>
     <li data-os="linux"><a href="https://github.com/DebrajGhose/slopgene/releases/latest/download/SlopGene-linux.AppImage"><strong>Linux</strong><span>other distributions, AppImage</span></a></li>
   </ul>
-  <p class="small" id="latest">Each download installs the desktop app and the <code>slopgene</code> command line.</p>
-  <p class="small">The installers are not code-signed, so Windows and macOS warn before the first start, and <a href="https://github.com/DebrajGhose/slopgene#the-first-start">the README says which button to press</a>. Older versions, the plain archives and the checksums are on the <a href="https://github.com/DebrajGhose/slopgene/releases">releases page</a>.</p>
+  <p><a href="https://github.com/DebrajGhose/slopgene">SlopGene on GitHub</a>: source code, documentation and older versions.</p>
+  <p class="small" id="latest">The installers are not signed, so Windows and macOS warn at the first start.</p>
 
-  <h2>See it work</h2>
-  <p>Cutting GFP out of one plasmid and putting it into another. Click the gene on the map, press Clone, and the protocol opens as a bench. A click on a card zooms into it, where the enzymes that cut nearest the part are picked, and the join shows the new plasmid with its bases underneath.</p>
+  <h2>Sample Workflow</h2>
+  <h3>Restriction cloning</h3>
   <figure>
-    <img src="images/clone-by-cutting.gif" alt="Cutting GFP out of pGFP and putting it into pDoom, step by step on the bench" width="1000" height="760" loading="lazy">
+    <img src="images/clone-by-cutting.gif" alt="Cutting GFP out of pGFP with EcoRI and BamHI and putting it into pDoom, step by step on the bench" width="1000" height="760" loading="lazy">
   </figure>
-  <p>Copying a part out by PCR instead, when no enzyme cuts near it. The primers are designed for the part, and the enzymes chosen go on their tails, so the copy has the same sticky ends as the opened vector.</p>
+  <h3>Cloning by PCR</h3>
   <figure>
     <img src="images/clone-by-pcr.gif" alt="Copying mCherry out of pCherry by PCR with EcoRI and BamHI tails, and putting it into pDoom" width="1000" height="760" loading="lazy">
-    <figcaption>The plasmids in these animations are made up. They are in the repository under <a href="https://github.com/DebrajGhose/slopgene/tree/main/examples/maps">examples/maps</a>, to try the same steps with.</figcaption>
   </figure>
 
-  <h2>What it does</h2>
-  <ul class="plain">
-    <li>Opens and saves <code>.dna</code>, GenBank and FASTA files, and draws circular and linear maps.</li>
-    <li>Edits sequences, features and primers, with undo, and finds the sites of 581 commercial enzymes.</li>
-    <li>Designs primers and simulates PCR, digests, restriction cloning, Gibson assembly and Golden Gate.</li>
-    <li>Builds a cloning construct step by step on a bench, with every junction checked.</li>
-    <li>Aligns sequencing reads to a map and shows every change, down to its effect on the protein.</li>
-    <li>Does all of it from the command line and from scripts too, with JSON output for pipelines and AI agents.</li>
-  </ul>
-  <pre><code>slopgene sites pUC19.dna --unique
-slopgene digest pUC19.dna -e EcoRI,PvuII --gel gel.png
-slopgene verify "sequencing/*.gbk" --refs maps/
-slopgene excise donor.dna --feature GFP --vector pUC19.dna --json</code></pre>
-  <p>The <a href="https://github.com/DebrajGhose/slopgene#readme">README on GitHub</a> has the full list of functions, the keyboard shortcuts, the scripting guide and the source code.</p>
-
-  <footer>
-    <p>SlopGene is written by Claude and Debraj Ghose. It is free under the MIT or Apache 2.0 licence, and it was built with support from the AI for Science program of Anthropic.</p>
-    <p>SlopGene reads and writes the <code>.dna</code> files of SnapGene, as a clean-room reimplementation of the format. SnapGene is a trademark of Dotmatics, and SlopGene is not affiliated with either.</p>
-  </footer>
+  <h2>Command line and scripts</h2>
+  <p>Everything the app does, the <code>slopgene</code> command line and its scripts do too, with JSON output for pipelines and AI agents.</p>
+  <pre><code>// The restriction cloning above, as a script. The protocol it writes opens in the app as the bench.
+protocol_new("clone.json", "pDoom.dna", "pGFP.dna", #{ cut_out: "GFP", enzymes: "EcoRI,BamHI" });</code></pre>
+  <p class="small">Run it with <code>slopgene run clone.rhai</code>. The <a href="https://github.com/DebrajGhose/slopgene/blob/main/docs/scripting.md">scripting guide</a> lists every function.</p>
 </main>
 <script>
   (function () {
