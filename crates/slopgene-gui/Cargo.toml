@@ -17,6 +17,7 @@ slopgene-core = { workspace = true }
 slopgene-script = { workspace = true }
 eframe = { workspace = true }
 rfd = { workspace = true }
+gif = { workspace = true }
 
 # Puts the app icon into slopgene-gui.exe (see build.rs). Cargo picks build dependencies by the
 # machine doing the build, and only Windows machines build the Windows program here.

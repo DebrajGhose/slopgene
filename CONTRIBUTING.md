@@ -52,6 +52,12 @@ A protocol file (`slopgene.protocol/1` JSON) opens in a protocol tab, and `--ste
 `--drag X1,Y1,X2,Y2` presses at the first point, moves to the second and holds, so the picture shows a drag on its way.
 The drag ends just before the screenshot, so a zoom has finished first.
 Its points are window coordinates, read off an earlier screenshot of the same window.
+`--play SCRIPT` plays pointer and key actions into the window first, with a cursor drawn where the pointer is, and the screenshot is taken once the script has played.
+A script is a list of steps separated by semicolons, such as `--play "wait 1; click 300,200; drag 100,100,400,100; key Escape"`, and SCRIPT may name a file that holds it.
+The steps are `wait` (seconds), `move`, `click`, `drag`, `scroll` (`scroll X,Y,DY` turns the wheel at a point) and `key` (`Escape`, `Enter`, `Down`, `ctrl+shift+n`), and the pointer glides to each point.
+`--record out.gif` saves the frames into an animated GIF while the script plays, in place of a screenshot, and quits when the script ends.
+A frame that looks the same as the one before costs nothing, and the recording plays back at the speed the window ran.
+`scripts/readme-animations.sh` records the README's animations this way, from the maps in `examples/maps`.
 
 ## Rules
 

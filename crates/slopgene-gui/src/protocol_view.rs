@@ -2754,19 +2754,27 @@ fn sequence_pane(
     ui.painter().line_segment([pane.left_top(), pane.right_top()], Stroke::new(1.0, palette.line));
     let inner = Rect::from_min_max(pane.min + vec2(0.0, 1.0), pane.max);
     let mut child = ui.new_child(UiBuilder::new().max_rect(inner).id_salt(("protocol-sequence", tab.id)));
+    // Nothing of the pane may reach past its edge into the panel beside it.
+    child.set_clip_rect(inner.intersect(child.clip_rect()));
     child.add_enabled_ui(interactive, |ui| {
+        // The line: Hide at the right, placed first so that the words cannot push it past the
+        // edge, then the name and the hint, which is cut short when the pane is narrow.
         ui.horizontal(|ui| {
-            ui.add_space(12.0);
-            ui.label(RichText::new(format!("{} · {} bp", target.doc.name, thousands(target.doc.len()))).font(style::bold_font(12.5)).color(palette.ink));
-            let what = match target.setting {
-                Some(_) => "Drag across the bases to mark the part. The map follows, and the map's marks show here.",
-                None => "The bases of what the picture shows, with the same stretch highlighted. A selection here shows on the picture too.",
-            };
-            ui.label(RichText::new(what).small().color(palette.muted));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui.small_button("Hide").on_hover_text("Hide the bases. The Sequence button above brings them back.").clicked() {
                     edits.push(Edit::ShowSequence(false));
                 }
+                ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                    ui.add_space(12.0);
+                    ui.label(
+                        RichText::new(format!("{} · {} bp", target.doc.name, thousands(target.doc.len()))).font(style::bold_font(12.5)).color(palette.ink),
+                    );
+                    let what = match target.setting {
+                        Some(_) => "Drag across the bases to mark the part. The map follows, and the map's marks show here.",
+                        None => "The bases of what the picture shows, with the same stretch highlighted. A selection here shows on the picture too.",
+                    };
+                    ui.add(egui::Label::new(RichText::new(what).small().color(palette.muted)).truncate());
+                });
             });
         });
         seq_view::show(ui, &mut preview.tab, settings);
@@ -2852,10 +2860,10 @@ fn detail(
             edits.push(Edit::Zoom(None));
         }
         ui.add_space(8.0);
-        ui.label(RichText::new(&told.headline).font(style::bold_font(18.0)).color(palette.ink));
-        // The bases under the picture can be hidden and shown again from here.
-        if target.is_some() {
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+        // The bases under the picture can be hidden and shown again from here. The switch is
+        // placed first, so a long headline is cut short rather than run under it.
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if target.is_some() {
                 let shown = tab.show_sequence;
                 let hint = "Show the molecule's bases under the picture, with the same stretch highlighted. A stretch selected in either shows in both.";
                 ui.add_enabled_ui(interactive, |ui| {
@@ -2863,8 +2871,12 @@ fn detail(
                         edits.push(Edit::ShowSequence(!shown));
                     }
                 });
+                ui.add_space(8.0);
+            }
+            ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                ui.add(egui::Label::new(RichText::new(&told.headline).font(style::bold_font(18.0)).color(palette.ink)).truncate());
             });
-        }
+        });
     });
     let waits = tab.run.steps.get(step).is_some_and(|r| r.status == Status::NeedsChoice);
     // A cut without pieces yet shows the plasmid's map, so its hint is the map's. The map's hint

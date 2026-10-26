@@ -3,7 +3,9 @@
 # from the Actions tab builds the same files as downloadable artifacts and makes no release.
 #
 # The packages come from cargo-packager, configured in crates/slopgene-gui/Cargo.toml. None of them
-# is code-signed (see "The first start" in the README).
+# is code-signed (see "The first start" in the README). Each installer goes into the release twice:
+# under its full name, which carries the version, and under a name that stays the same from one
+# version to the next, which the README's download buttons point at through releases/latest.
 name: Release
 
 on:
@@ -73,6 +75,7 @@ jobs:
           v=${{ needs.version.outputs.version }}
           mkdir dist
           mv "target/release/slopgene-gui_${v}_x64-setup.exe" "dist/SlopGene_${v}_windows_x64-setup.exe"
+          cp "dist/SlopGene_${v}_windows_x64-setup.exe" dist/SlopGene-windows-setup.exe
           7z a "dist/slopgene_${v}_windows_x64.zip" ./target/release/slopgene.exe ./target/release/slopgene-gui.exe
           ls -l dist
 
@@ -137,6 +140,7 @@ jobs:
           cp -R "$rel/SlopGene.app" stage/
           ln -s /Applications stage/Applications
           hdiutil create -volname SlopGene -srcfolder stage -ov -format UDZO "dist/SlopGene_${v}_macos_universal.dmg"
+          cp "dist/SlopGene_${v}_macos_universal.dmg" dist/SlopGene-macos.dmg
           tar -czf "dist/slopgene_${v}_macos_universal.tar.gz" -C "$rel" slopgene slopgene-gui
           ls -l dist
 
@@ -193,6 +197,8 @@ jobs:
           mkdir dist
           mv "target/release/slopgene-gui_${v}_amd64.deb" "dist/slopgene_${v}_amd64.deb"
           mv "target/release/slopgene-gui_${v}_x86_64.AppImage" "dist/SlopGene_${v}_x86_64.AppImage"
+          cp "dist/slopgene_${v}_amd64.deb" dist/SlopGene-linux.deb
+          cp "dist/SlopGene_${v}_x86_64.AppImage" dist/SlopGene-linux.AppImage
           tar -czf "dist/slopgene_${v}_linux_x86_64.tar.gz" -C target/release slopgene slopgene-gui
           ls -l dist
 
@@ -229,9 +235,11 @@ jobs:
           cat > notes.md <<'EOF'
           | System | Install with | Command line only |
           |---|---|---|
-          | Windows 10 or 11 (x64) | `SlopGene_*_windows_x64-setup.exe` | `slopgene_*_windows_x64.zip` |
-          | macOS 11 or later (Apple silicon and Intel) | `SlopGene_*_macos_universal.dmg` | `slopgene_*_macos_universal.tar.gz` |
-          | Linux (x86_64) | `slopgene_*_amd64.deb` or `SlopGene_*_x86_64.AppImage` | `slopgene_*_linux_x86_64.tar.gz` |
+          | Windows 10 or 11 (x64) | `SlopGene-windows-setup.exe` | `slopgene_*_windows_x64.zip` |
+          | macOS 11 or later (Apple silicon and Intel) | `SlopGene-macos.dmg` | `slopgene_*_macos_universal.tar.gz` |
+          | Linux (x86_64) | `SlopGene-linux.deb` or `SlopGene-linux.AppImage` | `slopgene_*_linux_x86_64.tar.gz` |
+
+          The files whose names carry the version number are the same installers under their full names.
 
           EOF
           # The link names this repository, so the notes stay right in a fork or a renamed repository.

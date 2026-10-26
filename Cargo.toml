@@ -8,7 +8,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 rust-version = "1.95"
 license = "MIT OR Apache-2.0"
@@ -39,6 +39,8 @@ eframe = { version = "0.37", default-features = false, features = [
 ] }
 rfd = "0.17"
 resvg = "0.48"
+# Writes the app's recordings (slopgene-gui --record). Its own colour quantizer is left out.
+gif = { version = "0.14", default-features = false, features = ["std"] }
 
 [profile.dev]
 # Full debug info makes the GUI binary ~350 MB; line tables keep backtraces readable.

@@ -162,6 +162,7 @@ It bundles its fonts (Inter and JetBrains Mono), so it looks the same on every s
 | `seq_view.rs` | The sequence view: both strands, ruler, features, enzyme cuts, translations, typing |
 | `panels.rs` | The inspector: selection details, the feature editor, lists of features, enzymes and primers |
 | `scene_paint.rs` | Painting a `Scene` with egui, and hit-testing its tagged shapes |
+| `record.rs` | Playing a script of pointer and key actions into the window with a cursor drawn (`--play`), and recording the frames into an animated GIF (`--record`), for pictures of the app and the README's animations |
 | `style.rs` | Fonts, colours and spacing |
 
 Each document keeps up to 200 undo steps as snapshots of the whole `Document`.

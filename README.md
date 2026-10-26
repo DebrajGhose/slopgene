@@ -1,18 +1,41 @@
 # SlopGene
 
-SlopGene is a plasmid and sequence editor with a scriptable core.
-It reads and writes SnapGene `.dna` files, so it works alongside SnapGene on the same files.
-It runs on Windows, macOS and Linux as two self-contained programs.
-
-- `slopgene-gui` is the desktop app: plasmid maps, the sequence, features, primers, enzymes and cloning tools.
-- `slopgene` is the command line: every analysis and edit, with JSON output for scripts and AI agents.
-
-Both programs share one Rust library, so a digest, a PCR or a map gives the same result everywhere.
+SlopGene is a free, open-source plasmid and sequence editor for Windows, macOS and Linux.
+It draws plasmid maps, edits sequences, finds enzyme sites, designs primers, simulates PCR and digests, checks sequencing results, and builds cloning constructs step by step on a bench.
 
 ## Download
 
-The [latest release](https://github.com/DebrajGhose/slopgene/releases/latest) has an installer for each system.
+<p>
+  <a href="https://github.com/DebrajGhose/slopgene/releases/latest/download/SlopGene-windows-setup.exe"><img src="docs/images/download-windows.svg" alt="Download for Windows: setup program (.exe)" height="56"></a>
+  <a href="https://github.com/DebrajGhose/slopgene/releases/latest/download/SlopGene-macos.dmg"><img src="docs/images/download-macos.svg" alt="Download for macOS: disk image (.dmg)" height="56"></a>
+  <a href="https://github.com/DebrajGhose/slopgene/releases/latest/download/SlopGene-linux.deb"><img src="docs/images/download-linux-deb.svg" alt="Download for Linux: Debian package (.deb)" height="56"></a>
+  <a href="https://github.com/DebrajGhose/slopgene/releases/latest/download/SlopGene-linux.AppImage"><img src="docs/images/download-linux-appimage.svg" alt="Download for Linux: AppImage" height="56"></a>
+</p>
+
+Each download installs the desktop app and the `slopgene` command line.
+The installers are not code-signed, so Windows and macOS warn before the first start, and [The first start](#the-first-start) says which button to press.
+Older versions, the plain archives and the checksums are on the [releases page](https://github.com/DebrajGhose/slopgene/releases).
+
+## See it work
+
+Cutting GFP out of one plasmid and putting it into another.
+Click the gene on the map, press Clone, and the protocol opens as a bench.
+A click on a card zooms into it, where the enzymes that cut nearest the part are picked, and the join shows the new plasmid with its bases underneath.
+
+![Cutting GFP out of pGFP and putting it into pDemo, step by step on the bench](docs/images/clone-by-cutting.gif)
+
+Copying a part out by PCR instead, when no enzyme cuts near it.
+The primers are designed for the part, and the enzymes chosen go on their tails, so the copy has the same sticky ends as the opened vector.
+
+![Copying mCherry out of pCherry by PCR with EcoRI and BamHI tails, and putting it into pDemo](docs/images/clone-by-pcr.gif)
+
+The plasmids in these animations are made up, and they are in [examples/maps](examples/maps) to try the same steps with.
+
+## Installing
+
+The [releases page](https://github.com/DebrajGhose/slopgene/releases) has these files for each version.
 Every installer puts both the desktop app and the `slopgene` command line on the computer.
+The download buttons above fetch the newest installers under the names `SlopGene-windows-setup.exe`, `SlopGene-macos.dmg`, `SlopGene-linux.deb` and `SlopGene-linux.AppImage`.
 
 | System | File to download | Notes |
 |---|---|---|
@@ -53,9 +76,14 @@ The command line sits beside the app.
 
 ## What it does
 
+SlopGene is two self-contained programs that share one Rust library, so a digest, a PCR or a map gives the same result everywhere.
+
+- `slopgene-gui` is the desktop app: plasmid maps, the sequence, features, primers, enzymes and cloning tools.
+- `slopgene` is the command line: every analysis and edit, with JSON output for scripts and AI agents.
+
 | Area | Functions |
 |---|---|
-| Files | SnapGene `.dna`, `.rna` and `.prot` (byte-for-byte round trips, the default for saving), GenBank, FASTA, JSON |
+| Files | `.dna`, `.rna` and `.prot` (byte-for-byte round trips, the default for saving), GenBank, FASTA, JSON |
 | Viewing | circular and linear maps, sequence view with both strands, translations and enzyme cuts |
 | Editing | insert, delete, replace, invert, reverse-complement, set origin, topology, features, primers, undo |
 | Enzymes | 581 commercial enzymes from REBASE, named sets, unique cutters, digests with exact sticky ends |
@@ -131,7 +159,7 @@ In the map, Delete and Backspace remove the selected bases.
 Undo, redo, copy, cut, paste and select all work in both views and after a click in the inspector.
 A text field keeps these keys for its own text while you type in it.
 Undo puts the cursor and selection back as they were, and a burst of typing undoes in one step.
-New documents save as SnapGene `.dna` files, which keep every annotation and open in SnapGene.
+New documents save as `.dna` files, which keep every annotation.
 A document opened from FASTA or GenBank saves back to its own file when that format can hold all of it.
 When it cannot, as with features added to a FASTA file, Save writes a `.dna` file beside the original and leaves the original as it was.
 Files that change on disk reload by themselves when they have no unsaved edits.
@@ -275,7 +303,7 @@ The desktop app loads the system's Wayland or X11 libraries and GPU drivers when
 On macOS the Xcode command-line tools provide the compiler and linker.
 
 Run the tests with `cargo test --workspace`.
-Three of the tests compare SlopGene with SnapGene, and they check something only where SnapGene is installed.
+Three of the tests need files that are not in the repository, and they pass without checking anything when the files are absent.
 [CONTRIBUTING.md](CONTRIBUTING.md) describes them.
 
 ## Layout of the code
@@ -293,15 +321,6 @@ Three of the tests compare SlopGene with SnapGene, and they check something only
 
 [CONTRIBUTING.md](CONTRIBUTING.md) explains how to build and test SlopGene, the rules the code follows, and how a release is made.
 
-## How SlopGene relates to SnapGene
-
-SlopGene is a clean-room reimplementation.
-Its file-format support comes from studying SnapGene documents and public parsers such as Biopython's.
-Its feature list comes from SnapGene's interface text and sample project.
-No SnapGene program code was disassembled or decompiled, and no SnapGene data (feature library, vector maps, sample files) is part of this repository.
-SnapGene is a trademark of Dotmatics.
-SlopGene is not affiliated with SnapGene or Dotmatics.
-
 ## Licence
 
 SlopGene is free and open source.
@@ -313,3 +332,13 @@ You may use, copy, change and share it under either the MIT licence ([LICENSE-MI
 - Genetic codes come from the NCBI translation tables.
 - Melting temperatures use the nearest-neighbour parameters of SantaLucia (1998) and SantaLucia and Hicks (2004).
 - The app bundles the Inter and JetBrains Mono fonts under the SIL Open Font License (`crates/slopgene-gui/assets/fonts`).
+
+## How SlopGene relates to SnapGene
+
+The `.dna`, `.rna` and `.prot` files that SlopGene reads and writes are SnapGene's formats, so the two programs work on the same files.
+SlopGene is a clean-room reimplementation.
+Its file-format support comes from studying SnapGene documents and public parsers such as Biopython's.
+Its feature list comes from SnapGene's interface text and sample project.
+No SnapGene program code was disassembled or decompiled, and no SnapGene data (feature library, vector maps, sample files) is part of this repository.
+SnapGene is a trademark of Dotmatics.
+SlopGene is not affiliated with SnapGene or Dotmatics.

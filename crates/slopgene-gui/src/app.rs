@@ -4,6 +4,7 @@
 use crate::align_view;
 use crate::doc::{DocTab, Saved, View, format_label};
 use crate::protocol_view::{self, ProtocolTab};
+use crate::record;
 use crate::style::{self, Palette};
 use crate::{map_view, panels, scene_paint, seq_view};
 use eframe::egui::{self, Key, KeyboardShortcut, Modifiers, RichText, Sense, vec2};
@@ -326,6 +327,20 @@ pub struct StartOptions {
     /// Save a screenshot of the window to this file after `screenshot_after` frames, then quit.
     pub screenshot: Option<PathBuf>,
     pub screenshot_after: u64,
+    /// A script of pointer and key actions to play into the window (see `record::Play`).
+    pub play: Option<record::Play>,
+    /// Record the window into this animated GIF while the script plays, then quit.
+    pub record: Option<PathBuf>,
+    /// The window size asked for. A picture or a recording sets it on its second frame, since
+    /// eframe first restores the size the window had last.
+    pub size: [f32; 2],
+}
+
+impl StartOptions {
+    /// Whether the run makes a picture or a recording, rather than a session with a person.
+    pub fn headless(&self) -> bool {
+        self.screenshot.is_some() || self.record.is_some()
+    }
 }
 
 #[derive(Default)]
@@ -430,14 +445,17 @@ pub struct SlopGeneApp {
     start: StartOptions,
     screenshot_done: Arc<AtomicBool>,
     screenshot_requested: bool,
+    /// The script being played into the window, and the recording being made of it.
+    play: Option<record::Play>,
+    recorder: Option<record::Recorder>,
 }
 
 impl SlopGeneApp {
     pub fn new(cc: &eframe::CreationContext<'_>, start: StartOptions) -> SlopGeneApp {
-        // A screenshot run starts from the default layout rather than the panel sizes saved by
-        // the last session, so the same command always gives the same picture. This must come
-        // before the fonts: egui keeps new font definitions in its memory until the next frame.
-        if start.screenshot.is_some() {
+        // A picture or a recording starts from the default layout rather than the panel sizes
+        // saved by the last session, so the same command always gives the same picture. This must
+        // come before the fonts: egui keeps new font definitions in its memory until the next frame.
+        if start.headless() {
             cc.egui_ctx.memory_mut(|memory| *memory = egui::Memory::default());
         }
         style::install_fonts(&cc.egui_ctx);
@@ -447,7 +465,7 @@ impl SlopGeneApp {
             if let Some(list) = storage.get_string("recent") {
                 recent = list.lines().filter(|l| !l.is_empty()).map(PathBuf::from).collect();
             }
-            if !start.dark && start.screenshot.is_none() {
+            if !start.dark && !start.headless() {
                 dark = storage.get_string("dark").as_deref() == Some("1");
             }
         }
@@ -478,6 +496,8 @@ impl SlopGeneApp {
             start: start.clone(),
             screenshot_done: Arc::new(AtomicBool::new(false)),
             screenshot_requested: false,
+            play: start.play.clone(),
+            recorder: start.record.clone().map(record::Recorder::new),
         };
         for path in &start.files {
             app.open_path(path.clone());
@@ -1324,6 +1344,11 @@ impl eframe::App for SlopGeneApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         self.frames += 1;
+        // A picture or a recording keeps the size asked for on the command line. eframe opens the
+        // window at the size it had last, so the size is set again once the window is up.
+        if self.frames == 2 && self.start.headless() && self.start.size[0] > 0.0 {
+            ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(vec2(self.start.size[0], self.start.size[1])));
+        }
         // `--zoom` zooms into the step shown on the third frame, as a click would, so a screenshot
         // can catch the zoom on its way in as well as at its end.
         if self.start.zoom
@@ -1479,9 +1504,22 @@ impl eframe::App for SlopGeneApp {
         let title = title.map(|t| format!("{t} · SlopGene")).unwrap_or_else(|| "SlopGene".to_string());
         ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
 
-        // Screenshot mode: capture once the layout has settled, then quit.
+        // The cursor of a played script, or of a `--drag`, drawn over everything. A script keeps
+        // the frames coming while it plays.
+        if let Some(play) = &self.play {
+            play.draw(&ctx, palette.accent);
+            ctx.request_repaint();
+        } else if self.start.drag.is_some()
+            && let Some(pointer) = ctx.input(|i| i.pointer.latest_pos())
+        {
+            record::draw_cursor(&ctx, pointer, &[], 0.0, palette.accent);
+        }
+
+        // Screenshot mode: capture once the layout has settled and the script, if any, has
+        // played, then quit.
+        let played = self.play.as_ref().is_none_or(record::Play::finished);
         if let Some(path) = self.start.screenshot.clone() {
-            if self.frames >= self.start.screenshot_after && !self.screenshot_requested {
+            if self.frames >= self.start.screenshot_after && played && !self.screenshot_requested {
                 self.screenshot_requested = true;
                 let done = self.screenshot_done.clone();
                 ctx.request_screenshot(move |image| {
@@ -1497,16 +1535,29 @@ impl eframe::App for SlopGeneApp {
             }
             ctx.request_repaint();
         }
+
+        // Recording: ask for a frame as the window draws, and quit once the file is written.
+        if let Some(recorder) = &mut self.recorder {
+            let time = ctx.input(|i| i.time);
+            let stop = played && self.frames >= self.start.screenshot_after;
+            recorder.tick(&ctx, time, self.frames, stop);
+            if recorder.finished() && !self.allow_quit {
+                eprintln!("{}", recorder.summary());
+                self.allow_quit = true;
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+            ctx.request_repaint();
+        }
     }
 
-    /// Screenshot runs leave the saved layout of real sessions alone.
+    /// Pictures and recordings leave the saved layout of real sessions alone.
     fn persist_egui_memory(&self) -> bool {
-        self.start.screenshot.is_none()
+        !self.start.headless()
     }
 
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
-        // A screenshot run (perhaps with --dark) must not change the user's saved settings.
-        if self.start.screenshot.is_some() {
+        // A picture or a recording (perhaps with --dark) must not change the user's saved settings.
+        if self.start.headless() {
             return;
         }
         let recent: Vec<String> = self.recent.iter().map(|p| p.to_string_lossy().into_owned()).collect();
@@ -1518,11 +1569,16 @@ impl eframe::App for SlopGeneApp {
         Palette::get(self.settings.dark).canvas.to_normalized_gamma_f32()
     }
 
+    /// `--play` feeds its script's pointer and key events into the window frame by frame.
+    ///
     /// `--drag` plays a drag into the window for a screenshot: the pointer arrives at the first
     /// point, presses there, moves to the second point over 12 frames, and holds, so the picture
     /// shows the drag on its way. The drag ends a few frames before the screenshot, so anything
     /// the window does first, such as a zoom, has finished before the button goes down.
     fn raw_input_hook(&mut self, _ctx: &egui::Context, raw_input: &mut egui::RawInput) {
+        if let Some(play) = &mut self.play {
+            play.tick(raw_input);
+        }
         let Some((from, to)) = self.start.drag else { return };
         let start = self.start.screenshot_after.saturating_sub(16).max(4);
         let button = egui::Event::PointerButton { pos: from, button: egui::PointerButton::Primary, pressed: true, modifiers: Modifiers::default() };
@@ -1642,6 +1698,18 @@ impl SlopGeneApp {
             |ui| {
                 ui.horizontal_centered(|ui| {
                     let small = |text: String| RichText::new(text).size(11.5).color(palette.muted);
+                    // A notice is cut short rather than run under the labels on the right, which
+                    // keep this much room.
+                    let notice_label = |ui: &mut egui::Ui, text: String| {
+                        let room = ui.available_width() - 300.0;
+                        if room > 40.0 {
+                            ui.add_space(16.0);
+                            ui.scope(|ui| {
+                                ui.set_max_width(room - 16.0);
+                                ui.add(egui::Label::new(RichText::new(text).size(11.5).color(palette.accent)).truncate());
+                            });
+                        }
+                    };
                     if let Front::Protocol(ii) = self.front
                         && let Some(tab) = self.protocols.get(ii)
                     {
@@ -1650,8 +1718,7 @@ impl SlopGeneApp {
                         if let Some((text, at)) = notice
                             && at.elapsed() < Duration::from_secs(6)
                         {
-                            ui.add_space(16.0);
-                            ui.label(RichText::new(text).size(11.5).color(palette.accent));
+                            notice_label(ui, text);
                         }
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             ui.label(small(format!("protocol  ·  {}", if tab.dirty { "unsaved" } else { "saved" })));
@@ -1673,8 +1740,7 @@ impl SlopGeneApp {
                         if let Some((text, at)) = notice
                             && at.elapsed() < Duration::from_secs(6)
                         {
-                            ui.add_space(16.0);
-                            ui.label(RichText::new(text).size(11.5).color(palette.accent));
+                            notice_label(ui, text);
                         }
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             let state = if tab.dirty { "unsaved" } else { "saved" };

@@ -2,7 +2,8 @@
 //!
 //! Usage: `slopgene-gui [FILES...] [--dark] [--view map|sequence|split|alignment] [--select A..B]
 //! [--feature NAME] [--palette] [--console] [--digest ENZYMES] [--align READ] [--step N]
-//! [--zoom] [--new-protocol [--enzymes NAMES] [--pcr]] [--size WxH] [--screenshot OUT.png [--after FRAMES] [--drag X1,Y1,X2,Y2]]`
+//! [--zoom] [--new-protocol [--enzymes NAMES] [--pcr]] [--size WxH] [--play SCRIPT]
+//! [--screenshot OUT.png [--after FRAMES] [--drag X1,Y1,X2,Y2]] [--record OUT.gif]`
 //!
 //! A file may be a protocol (`slopgene.protocol/1` JSON), which opens in a protocol tab.
 //!
@@ -17,6 +18,8 @@
 //! `--screenshot` renders the window, saves it as PNG and quits; it is used to check the
 //! interface without a person at the screen. `--drag` plays a held drag into it first, from one
 //! point to another (in points from the window's top left), so the picture shows a drag on its way.
+//! `--play` plays a script of pointer and key actions into the window first, with a cursor drawn
+//! (see `record.rs`), and `--record` saves the frames into an animated GIF while it plays.
 
 // No console window behind the app in release builds on Windows.
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
@@ -27,6 +30,7 @@ mod doc;
 mod map_view;
 mod panels;
 mod protocol_view;
+mod record;
 mod scene_paint;
 mod seq_view;
 mod style;
@@ -72,6 +76,19 @@ fn parse_args() -> (StartOptions, [f32; 2]) {
             "--pcr" => options.pcr = true,
             "--screenshot" => options.screenshot = args.next().map(PathBuf::from),
             "--after" => options.screenshot_after = args.next().and_then(|n| n.parse().ok()).unwrap_or(12),
+            "--play" => {
+                // The script itself, or the name of a file that holds it.
+                let text = args.next().unwrap_or_default();
+                let text = std::fs::read_to_string(&text).unwrap_or(text);
+                match record::Play::parse(&text) {
+                    Ok(play) => options.play = Some(play),
+                    Err(e) => {
+                        eprintln!("--play: {e}");
+                        std::process::exit(2);
+                    }
+                }
+            }
+            "--record" => options.record = args.next().map(PathBuf::from),
             "--size" => {
                 if let Some((w, h)) = args.next().as_deref().and_then(|s| s.split_once('x')) {
                     size = [w.parse().unwrap_or(size[0]), h.parse().unwrap_or(size[1])];
@@ -79,13 +96,14 @@ fn parse_args() -> (StartOptions, [f32; 2]) {
             }
             "-h" | "--help" => {
                 println!(
-                    "slopgene-gui [FILES...] [--dark] [--view map|sequence|split|alignment] [--select A..B] [--feature NAME] [--palette] [--console] [--digest ENZYMES] [--align READ] [--step N] [--zoom] [--new-protocol [--enzymes NAMES] [--pcr]] [--size WxH] [--screenshot OUT.png [--after N] [--drag X1,Y1,X2,Y2]]"
+                    "slopgene-gui [FILES...] [--dark] [--view map|sequence|split|alignment] [--select A..B] [--feature NAME] [--palette] [--console] [--digest ENZYMES] [--align READ] [--step N] [--zoom] [--new-protocol [--enzymes NAMES] [--pcr]] [--size WxH] [--play SCRIPT] [--screenshot OUT.png [--after N] [--drag X1,Y1,X2,Y2]] [--record OUT.gif]"
                 );
                 std::process::exit(0);
             }
             other => options.files.push(PathBuf::from(other)),
         }
     }
+    options.size = size;
     (options, size)
 }
 
@@ -121,8 +139,8 @@ fn main() -> eframe::Result<()> {
     }
     let native = eframe::NativeOptions {
         viewport,
-        // Screenshot runs should not reuse or overwrite the saved window state.
-        persist_window: start.screenshot.is_none(),
+        // Pictures and recordings should not overwrite the saved window state.
+        persist_window: !start.headless(),
         // eframe would keep the settings in a folder named after the app id. They stay in the
         // folder named after the app, where they were before the app id was set.
         persistence_path: settings_file(),
