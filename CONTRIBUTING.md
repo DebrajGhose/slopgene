@@ -88,8 +88,8 @@ git push origin v0.1.0
 
 `.github/workflows/release.yml` then builds the Windows, macOS and Linux installers on GitHub's machines.
 It stops when the tag and the version in `Cargo.toml` differ.
-The installers, the plain archives and their checksums go into a draft GitHub release.
-The draft becomes public when a maintainer publishes it.
+The installers, the plain archives and their checksums go into a GitHub release, published at once as the latest release.
+The README's download buttons and the app's update check read that release, so pushing the tag is the whole release.
 Starting the workflow by hand from the Actions tab builds the same files as downloadable artifacts and makes no release.
 The comments in `crates/slopgene-gui/Cargo.toml` show how to build each installer on your own computer.
 

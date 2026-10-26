@@ -1,6 +1,8 @@
-# Build the SlopGene installers for Windows, macOS and Linux and put them in a draft GitHub
-# release. Pushing a tag such as v0.1.0 runs this workflow and makes the draft. Starting it by hand
-# from the Actions tab builds the same files as downloadable artifacts and makes no release.
+# Build the SlopGene installers for Windows, macOS and Linux and publish them as a GitHub
+# release. Pushing a tag such as v0.1.0 runs this workflow and publishes the release at once, so
+# the README's download buttons and the app's update check see it without anyone clicking
+# Publish. Starting it by hand from the Actions tab builds the same files as downloadable
+# artifacts and makes no release.
 #
 # The packages come from cargo-packager, configured in crates/slopgene-gui/Cargo.toml. None of them
 # is code-signed (see "The first start" in the README). Each installer goes into the release twice:
@@ -76,7 +78,8 @@ jobs:
           mkdir dist
           mv "target/release/slopgene-gui_${v}_x64-setup.exe" "dist/SlopGene_${v}_windows_x64-setup.exe"
           cp "dist/SlopGene_${v}_windows_x64-setup.exe" dist/SlopGene-windows-setup.exe
-          7z a "dist/slopgene_${v}_windows_x64.zip" ./target/release/slopgene.exe ./target/release/slopgene-gui.exe
+          # The two programs at the top of the archive, without folders.
+          (cd target/release && 7z a "../../dist/slopgene_${v}_windows_x64.zip" slopgene.exe slopgene-gui.exe)
           ls -l dist
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -208,7 +211,7 @@ jobs:
           path: dist/*
           if-no-files-found: error
 
-  # A draft release holding every file, for a person to read over and publish.
+  # The release holding every file, published at once as the latest release.
   release:
     needs: [version, windows, macos, linux]
     if: github.ref_type == 'tag'
@@ -227,7 +230,7 @@ jobs:
           sha256sum * > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
-      - name: Draft release
+      - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.version.outputs.version }}
@@ -247,4 +250,4 @@ jobs:
             echo "The installers are not code-signed. [The first start]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY#the-first-start) in the README says how to open them anyway."
             echo '`SHA256SUMS.txt` holds the checksum of each file.'
           } >> notes.md
-          gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --draft --verify-tag --title "SlopGene $VERSION" --notes-file notes.md
+          gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --verify-tag --latest --title "SlopGene $VERSION" --notes-file notes.md
