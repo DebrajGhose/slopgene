@@ -627,7 +627,7 @@ mod tests {
     #[test]
     fn the_installation_is_told_from_where_the_program_is() {
         // Forward slashes, which Path splits on every system, so the test runs anywhere.
-        let win = Path::new("C:/Users/me/AppData/Local/SlopGene/slopgene-gui.exe");
+        let win = Path::new("C:/Apps/SlopGene/slopgene-gui.exe");
         assert_eq!(Installation::classify(Os::Windows, win, None, true), Installation::WindowsInstaller { folder: win.parent().unwrap().into() });
         assert_eq!(Installation::classify(Os::Windows, win, None, false), Installation::WindowsPortable { folder: win.parent().unwrap().into() });
         let built = Path::new("C:/code/slopgene/target/release/slopgene-gui.exe");
