@@ -37,6 +37,8 @@ Each of them passes without checking anything when SnapGene's files are absent.
 
 Sequencing verification has synthetic structural cases (deletions, insertions, duplications, inversions, a dimer) in the tests of `crates/slopgene-core/src/align.rs`.
 
+To try an update without a real release, point `SLOPGENE_UPDATE_API` at a server that answers `/releases/latest` with GitHub's JSON and serves the files it names, as the tests of `slopgene-update` do with a server of their own.
+
 ### Checking the app without a person at the screen
 
 To check the app without a person at the screen, render a screenshot and look at it:
@@ -54,7 +56,7 @@ The drag ends just before the screenshot, so a zoom has finished first.
 Its points are window coordinates, read off an earlier screenshot of the same window.
 `--play SCRIPT` plays pointer and key actions into the window first, with a cursor drawn where the pointer is, and the screenshot is taken once the script has played.
 A script is a list of steps separated by semicolons, such as `--play "wait 1; click 300,200; drag 100,100,400,100; key Escape"`, and SCRIPT may name a file that holds it.
-The steps are `wait` (seconds), `move`, `click`, `drag`, `scroll` (`scroll X,Y,DY` turns the wheel at a point) and `key` (`Escape`, `Enter`, `Down`, `ctrl+shift+n`), and the pointer glides to each point.
+The steps are `wait` (seconds), `move`, `click`, `drag`, `scroll` (`scroll X,Y,DY` turns the wheel at a point), `type TEXT` and `key` (`Escape`, `Enter`, `Down`, `ctrl+shift+n`), and the pointer glides to each point.
 `--record out.gif` saves the frames into an animated GIF while the script plays, in place of a screenshot, and quits when the script ends.
 A frame that looks the same as the one before costs nothing, and the recording plays back at the speed the window ran.
 `scripts/readme-animations.sh` records the README's animations this way, from the maps in `examples/maps`.
@@ -62,7 +64,7 @@ A frame that looks the same as the one before costs nothing, and the recording p
 ## Rules
 
 - **Clean room.** SlopGene learns SnapGene's file format only from SnapGene documents and public parsers. Never disassemble or decompile SnapGene's programs, and never scan them for strings. Never commit SnapGene's data (feature library, vector maps, sample files) or anyone's private sequence files. Read them locally as test data only.
-- **Core first.** Every calculation lives in `slopgene-core`. The command line, scripts and app only call it, so all three give the same answers.
+- **Core first.** Every calculation lives in `slopgene-core`. The command line, scripts and app only call it, so all three give the same answers. The update goes through `slopgene-update` in the same way.
 - **Coordinates.** The core uses 0-based half-open `Span`s, which may run through the origin. Every surface people or scripts see uses 1-based inclusive positions. Convert only with `Span::from_1based`, `Span::to_1based` and `span::parse_range`.
 - **Commands.** A command returns an `Output` that holds both its JSON and its text. Errors become `{"ok": false, "error": ...}` in JSON modes.
 - **Writes.** Files are written through `io::write_atomic`.
@@ -73,7 +75,8 @@ A frame that looks the same as the one before costs nothing, and the recording p
 
 - Loop indices are double letters that grow with nesting: `ii`, then `iii`, then `iiii`. Never use a bare `i`.
 - Comments explain what each block does and why, so a reader can follow the code from the comments alone.
-- Prose in the docs, commit messages and pull requests follows a few rules. Each sentence makes one claim. A paragraph opens with the sentence that sums it up. Commas only separate the items of a list, and semicolons are rare. There are no em dashes. Filler such as "it is worth noting" goes.
+- Prose in the docs and pull requests follows a few rules. Each sentence makes one claim. A paragraph opens with the sentence that sums it up. Commas only separate the items of a list, and semicolons are rare. There are no em dashes. Filler such as "it is worth noting" goes.
+- A commit message is a title of at most three words, such as "Publish releases directly", with no description under it.
 - Map colours come from the palette in `crates/slopgene-core/src/render/theme.rs`. The app's interface colours are in `crates/slopgene-gui/src/style.rs`.
 
 ## Making a release

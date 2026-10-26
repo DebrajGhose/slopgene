@@ -12,6 +12,7 @@ mod enzyme_cmd;
 mod inspect;
 mod protocol_cmd;
 mod render_cmd;
+mod update_cmd;
 mod util;
 mod verify_cmd;
 
@@ -468,6 +469,12 @@ enum Command {
     },
     /// Print a guide for scripts and AI agents.
     Guide,
+    /// Say whether a newer version of SlopGene is released on GitHub, and install it with --install.
+    Update {
+        /// Download the newer version and install it the way this copy was installed.
+        #[arg(long)]
+        install: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -856,6 +863,7 @@ fn run(command: Command) -> anyhow::Result<Output> {
             render_cmd::run(&path, output.as_deref(), width, height, &enzymes, dark, scale, font_size, linear, &colors)
         }
         Command::Guide => Ok(Output::new(serde_json::json!({ "guide": GUIDE }), GUIDE)),
+        Command::Update { install } => update_cmd::update(install),
         Command::Align { reference, read, show, width, map } => verify_cmd::align(&reference, &read, show.then_some(width), map.as_deref()),
         Command::Clone { vector, insert, enzymes, output } => cloning_cmd::clone_cmd(&vector, &insert, &enzymes, output.as_deref()),
         Command::Assemble { fragments, min_overlap, linear, output } => cloning_cmd::assemble(&fragments, min_overlap, linear, output.as_deref()),

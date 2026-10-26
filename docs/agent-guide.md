@@ -431,6 +431,13 @@ With `--json`, the command prints `{"ok": true, "output": ..., "result": ...}`.
 `slopgene run --api` lists every function with a one-line description.
 [scripting.md](scripting.md) documents the language, the functions and complete examples.
 
+## Updating
+
+`slopgene update` says whether a newer version of SlopGene is released on GitHub, and `slopgene update --install` downloads it, checks it against the release's checksums and installs it the way this copy was installed.
+With `--json` the answer has `current`, `latest`, `newer`, `published`, `page`, `installation` (`windows-installer`, `windows-portable`, `mac-bundle`, `deb`, `appimage`, `portable` or `development`) and `file`, the download for this system.
+A `development` copy, built from the source tree, is not installed over: build it again.
+The desktop app checks the same way when it starts, and its top bar then offers the update.
+
 ## The desktop app
 
 `slopgene view construct.dna` opens files in the desktop app.

@@ -6,6 +6,7 @@ use crate::doc::{DocTab, Saved, View, format_label};
 use crate::protocol_view::{self, ProtocolTab};
 use crate::record;
 use crate::style::{self, Palette};
+use crate::update_view::Updater;
 use crate::{map_view, panels, scene_paint, seq_view};
 use eframe::egui::{self, Key, KeyboardShortcut, Modifiers, RichText, Sense, vec2};
 use slopgene_core::digest::digest;
@@ -82,6 +83,7 @@ pub enum Action {
     AlignRead,
     DetectFeatures,
     Palette,
+    Update,
 }
 
 impl Action {
@@ -94,6 +96,7 @@ impl Action {
         Action::SaveAs,
         Action::Close,
         Action::Reload,
+        Action::Update,
         Action::AlignRead,
         Action::Digest,
         Action::DetectFeatures,
@@ -132,7 +135,9 @@ impl Action {
     /// commands, so they show without scrolling.
     pub fn group(self) -> &'static str {
         match self {
-            Action::Open | Action::NewSequence | Action::NewProtocol | Action::Save | Action::SaveAs | Action::Close | Action::Reload => "File",
+            Action::Open | Action::NewSequence | Action::NewProtocol | Action::Save | Action::SaveAs | Action::Close | Action::Reload | Action::Update => {
+                "File"
+            }
             Action::AlignRead | Action::Digest | Action::DetectFeatures => "Tools",
             Action::ViewMap
             | Action::ViewSequence
@@ -193,6 +198,7 @@ impl Action {
             Action::AlignRead => "Align reads or other sequences to this one…",
             Action::DetectFeatures => "Detect features from a library folder…",
             Action::Palette => "Command palette",
+            Action::Update => "Check for updates…",
         }
     }
 
@@ -448,6 +454,8 @@ pub struct SlopGeneApp {
     /// The script being played into the window, and the recording being made of it.
     play: Option<record::Play>,
     recorder: Option<record::Recorder>,
+    /// The check for a newer version, and its dialog.
+    updater: Updater,
 }
 
 impl SlopGeneApp {
@@ -461,6 +469,7 @@ impl SlopGeneApp {
         style::install_fonts(&cc.egui_ctx);
         let mut recent = Vec::new();
         let mut dark = start.dark;
+        let mut check_updates = true;
         if let Some(storage) = cc.storage {
             if let Some(list) = storage.get_string("recent") {
                 recent = list.lines().filter(|l| !l.is_empty()).map(PathBuf::from).collect();
@@ -468,6 +477,18 @@ impl SlopGeneApp {
             if !start.dark && !start.headless() {
                 dark = storage.get_string("dark").as_deref() == Some("1");
             }
+            check_updates = storage.get_string("check_updates").as_deref() != Some("0");
+        }
+        // The programs an update renamed aside are removed, and a newer version is looked for.
+        // Pictures and recordings stay off the network.
+        if let Ok(exe) = std::env::current_exe()
+            && let Some(folder) = exe.parent()
+        {
+            slopgene_update::tidy(folder);
+        }
+        let mut updater = Updater::new(check_updates);
+        if check_updates && !start.headless() {
+            updater.check();
         }
         let mut app = SlopGeneApp {
             tabs: Vec::new(),
@@ -498,6 +519,7 @@ impl SlopGeneApp {
             screenshot_requested: false,
             play: start.play.clone(),
             recorder: start.record.clone().map(record::Recorder::new),
+            updater,
         };
         for path in &start.files {
             app.open_path(path.clone());
@@ -858,6 +880,7 @@ impl SlopGeneApp {
                 self.digest_dialog = Some(DigestDialog { enzymes: default, result: None, lanes: Vec::new() });
             }
             Action::Palette => self.palette = PaletteState::opened(),
+            Action::Update => self.updater.open_dialog(),
             Action::AlignRead => self.open_alignment_view(),
             Action::DetectFeatures => self.detect_features_dialog(),
         }
@@ -1563,6 +1586,7 @@ impl eframe::App for SlopGeneApp {
         let recent: Vec<String> = self.recent.iter().map(|p| p.to_string_lossy().into_owned()).collect();
         storage.set_string("recent", recent.join("\n"));
         storage.set_string("dark", if self.settings.dark { "1".into() } else { "0".into() });
+        storage.set_string("check_updates", if self.updater.at_start { "1".into() } else { "0".into() });
     }
 
     fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
@@ -1655,6 +1679,14 @@ impl SlopGeneApp {
                         let shortcut = if cfg!(target_os = "macos") { "⌘K" } else { "Ctrl K" };
                         if ui.small_button(format!("Commands  {shortcut}")).clicked() {
                             actions.push(Action::Palette);
+                        }
+                        // A newer version, once the check has found one.
+                        if let Some(version) = self.updater.available() {
+                            ui.add_space(4.0);
+                            let label = RichText::new(format!("Update to {version}")).color(palette.accent);
+                            if ui.small_button(label).on_hover_text("A newer version of SlopGene is released. Download and install it.").clicked() {
+                                actions.push(Action::Update);
+                            }
                         }
                         // The tools sit apart from the views: Clone, then Align to its left.
                         // Clone starts a cloning protocol whatever tab is in front.
@@ -1973,6 +2005,14 @@ impl SlopGeneApp {
     }
 
     fn dialogs(&mut self, ctx: &egui::Context, palette: &Palette) {
+        // The update dialog, which closes the app once a new version is on its way.
+        let unsaved: Vec<String> =
+            self.tabs.iter().filter(|t| t.dirty).map(|t| t.title()).chain(self.protocols.iter().filter(|t| t.dirty).map(|t| t.title())).collect();
+        self.updater.show(ctx, palette, &unsaved);
+        if self.updater.quit && !self.allow_quit {
+            self.allow_quit = true;
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        }
         // Go to a position or select a range.
         if let Some(text) = self.goto.as_mut() {
             let mut done = false;

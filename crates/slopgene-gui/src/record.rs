@@ -8,8 +8,8 @@
 //!
 //! A script is a list of steps separated by semicolons or line breaks, with points in window
 //! coordinates from the top left corner: `wait 1.5`, `move X,Y`, `click X,Y`, `drag X1,Y1,X2,Y2`,
-//! `scroll X,Y,DY`, `key Escape` and `key ctrl+shift+n`. The pointer glides to each point rather
-//! than jumping there, so the eye can follow it.
+//! `scroll X,Y,DY`, `type TEXT`, `key Escape` and `key ctrl+shift+n`. The pointer glides to each
+//! point rather than jumping there, so the eye can follow it.
 
 use eframe::egui::{self, Color32, Modifiers, Pos2, Stroke, pos2, vec2};
 use slopgene_core::io;
@@ -42,7 +42,7 @@ const FIRST_FRAME: u64 = 6;
 const TRANSPARENT: u8 = 255;
 
 /// One step of a play script.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Step {
     /// Do nothing for this many seconds.
     Wait(f64),
@@ -57,6 +57,8 @@ pub enum Step {
     Scroll(Pos2, f32),
     /// Press a key and let it go.
     Key(egui::Key, Modifiers),
+    /// Type text into whatever has the keyboard.
+    Type(String),
 }
 
 /// A play script and how far it has got.
@@ -115,7 +117,8 @@ impl Play {
                     _ => return Err(format!("scroll takes X,Y,DY: \"{line}\"")),
                 },
                 "key" => parse_key(rest).ok_or_else(|| format!("cannot read the key in \"{line}\": write it as Escape, Enter, Down or ctrl+shift+n"))?,
-                _ => return Err(format!("unknown step \"{word}\" in \"{line}\": the steps are wait, move, click, drag, scroll and key")),
+                "type" => Step::Type(rest.to_string()),
+                _ => return Err(format!("unknown step \"{word}\" in \"{line}\": the steps are wait, move, click, drag, scroll, type and key")),
             };
             steps.push(step);
         }
@@ -141,7 +144,7 @@ impl Play {
             raw.events.push(egui::Event::PointerMoved(start));
         }
         self.presses.retain(|(_, at)| time - at < RIPPLE);
-        let Some(step) = self.steps.get(self.index).copied() else { return };
+        let Some(step) = self.steps.get(self.index).cloned() else { return };
         if self.began.is_none() {
             self.began = Some(time);
             self.from = self.pointer.unwrap_or(Pos2::ZERO);
@@ -225,6 +228,15 @@ impl Play {
                         self.phase = 2;
                         self.phase_at = time;
                     }
+                    false
+                }
+                _ => time - self.phase_at >= SETTLE,
+            },
+            Step::Type(text) => match self.phase {
+                0 => {
+                    events.push(egui::Event::Text(text));
+                    self.phase = 1;
+                    self.phase_at = time;
                     false
                 }
                 _ => time - self.phase_at >= SETTLE,
@@ -658,8 +670,10 @@ mod tests {
 
     #[test]
     fn a_script_reads_into_steps() {
-        let play =
-            Play::parse("wait 1.5; click 10,20 # the gene\nDRAG 1,2, 3,4; key Escape; key ctrl+shift+n; # a comment\n move 5,6; scroll 7,8,-90").unwrap();
+        let play = Play::parse(
+            "wait 1.5; click 10,20 # the gene\nDRAG 1,2, 3,4; key Escape; key ctrl+shift+n; # a comment\n move 5,6; scroll 7,8,-90; type hello world",
+        )
+        .unwrap();
         let ctrl_shift = Modifiers { ctrl: true, command: true, shift: true, ..Modifiers::default() };
         assert_eq!(
             play.steps,
@@ -671,6 +685,7 @@ mod tests {
                 Step::Key(egui::Key::N, ctrl_shift),
                 Step::Move(pos2(5.0, 6.0)),
                 Step::Scroll(pos2(7.0, 8.0), -90.0),
+                Step::Type("hello world".into()),
             ]
         );
         assert!(Play::parse("").is_err());

@@ -23,12 +23,12 @@ Cutting GFP out of one plasmid and putting it into another.
 Click the gene on the map, press Clone, and the protocol opens as a bench.
 A click on a card zooms into it, where the enzymes that cut nearest the part are picked, and the join shows the new plasmid with its bases underneath.
 
-![Cutting GFP out of pGFP and putting it into pDemo, step by step on the bench](docs/images/clone-by-cutting.gif)
+![Cutting GFP out of pGFP and putting it into pDoom, step by step on the bench](docs/images/clone-by-cutting.gif)
 
 Copying a part out by PCR instead, when no enzyme cuts near it.
 The primers are designed for the part, and the enzymes chosen go on their tails, so the copy has the same sticky ends as the opened vector.
 
-![Copying mCherry out of pCherry by PCR with EcoRI and BamHI tails, and putting it into pDemo](docs/images/clone-by-pcr.gif)
+![Copying mCherry out of pCherry by PCR with EcoRI and BamHI tails, and putting it into pDoom](docs/images/clone-by-pcr.gif)
 
 The plasmids in these animations are made up, and they are in [examples/maps](examples/maps) to try the same steps with.
 
@@ -74,6 +74,18 @@ The command line sits beside the app.
 | Windows | `%LOCALAPPDATA%\SlopGene\slopgene.exe` | Run once in PowerShell: `[Environment]::SetEnvironmentVariable("Path", [Environment]::GetEnvironmentVariable("Path", "User") + ";$env:LOCALAPPDATA\SlopGene", "User")`. Then open a new terminal. |
 | macOS | `/Applications/SlopGene.app/Contents/MacOS/slopgene` | `sudo ln -s /Applications/SlopGene.app/Contents/MacOS/slopgene /usr/local/bin/slopgene` |
 | Linux, from the `.deb` | `/usr/bin/slopgene` | Nothing to do |
+
+### Updating
+
+When it starts, SlopGene asks GitHub once whether a newer version has been released.
+When there is one, an "Update to 0.3.0" button appears in the top bar.
+It opens a dialog that says which file will be downloaded and what will happen on this computer, and "Download and install" does the rest: the file is downloaded, checked against the release's checksums and installed, and SlopGene starts again.
+On Windows the installer runs by itself with a progress bar.
+On macOS the programs inside SlopGene.app are replaced and the app is signed again.
+On Linux the AppImage file is replaced, or the package is installed after the password prompt.
+"Check for updates…" in the command palette looks at any time, and a checkbox in the dialog turns the check at start off.
+The command line does the same with `slopgene update`, and `slopgene update --install` installs the newer version.
+A copy built from the source tree is not updated this way: build it again.
 
 ## What it does
 
@@ -315,6 +327,7 @@ Three of the tests need files that are not in the repository, and they pass with
 | `crates/slopgene-script` | the Rhai scripting engine and its functions |
 | `crates/slopgene-cli` | the `slopgene` command |
 | `crates/slopgene-gui` | the `slopgene-gui` desktop app (egui) |
+| `crates/slopgene-update` | finding a newer version on GitHub, downloading it and installing it |
 
 [docs/architecture.md](docs/architecture.md) explains the design.
 

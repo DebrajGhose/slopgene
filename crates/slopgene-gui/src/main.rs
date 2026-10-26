@@ -34,6 +34,7 @@ mod record;
 mod scene_paint;
 mod seq_view;
 mod style;
+mod update_view;
 
 use app::{SlopGeneApp, StartOptions};
 use doc::View;

@@ -16,6 +16,7 @@ path = "src/main.rs"
 [dependencies]
 slopgene-core = { workspace = true }
 slopgene-script = { workspace = true }
+slopgene-update = { workspace = true }
 eframe = { workspace = true }
 rfd = { workspace = true }
 gif = { workspace = true }

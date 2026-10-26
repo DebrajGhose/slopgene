@@ -18,10 +18,10 @@ fi
 size=1000x760
 mkdir -p docs/images
 
-# Cutting GFP out of pGFP and putting it into pDemo. The gene is clicked on its map, Clone opens
+# Cutting GFP out of pGFP and putting it into pDoom. The gene is clicked on its map, Clone opens
 # the bench, the cut zooms into the map, the two enzymes nearest the gene are picked in the panel,
 # and the join shows the new plasmid with its bases underneath, where a stretch is selected.
-"$app" examples/maps/pDemo.dna examples/maps/pGFP.dna --view map --size "$size" \
+"$app" examples/maps/pDoom.dna examples/maps/pGFP.dna --view map --size "$size" \
     --record docs/images/clone-by-cutting.gif --play "
     wait 1.2
     click 508,345        # the GFP gene on the map
@@ -42,10 +42,10 @@ mkdir -p docs/images
     wait 3.0
 "
 
-# Copying mCherry out of pCherry by PCR and putting it into pDemo. The lane is switched from a cut
+# Copying mCherry out of pCherry by PCR and putting it into pDoom. The lane is switched from a cut
 # to a PCR from the card's menu, the Copy card zooms into the map with the primers, one enzyme is
 # picked for each primer's tail, and the bench scrolls down to the join.
-"$app" examples/maps/pDemo.dna examples/maps/pCherry.dna --view map --size "$size" \
+"$app" examples/maps/pDoom.dna examples/maps/pCherry.dna --view map --size "$size" \
     --record docs/images/clone-by-pcr.gif --play "
     wait 1.2
     click 508,400        # the mCherry gene on the map

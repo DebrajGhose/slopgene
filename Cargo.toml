@@ -5,10 +5,11 @@ members = [
     "crates/slopgene-script",
     "crates/slopgene-cli",
     "crates/slopgene-gui",
+    "crates/slopgene-update",
 ]
 
 [workspace.package]
-version = "0.2.1"
+version = "0.3.0"
 authors = ["Claude", "Debraj Ghose"]
 edition = "2024"
 rust-version = "1.95"
@@ -19,6 +20,7 @@ publish = false
 [workspace.dependencies]
 slopgene-core = { path = "crates/slopgene-core" }
 slopgene-script = { path = "crates/slopgene-script" }
+slopgene-update = { path = "crates/slopgene-update" }
 
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
@@ -42,6 +44,9 @@ rfd = "0.17"
 resvg = "0.48"
 # Writes the app's recordings (slopgene-gui --record). Its own colour quantizer is left out.
 gif = { version = "0.14", default-features = false, features = ["std"] }
+# Reads releases from GitHub and downloads them (slopgene-update), over TLS with rustls.
+ureq = { version = "2.12", default-features = false, features = ["tls"] }
+sha2 = "0.10"
 
 [profile.dev]
 # Full debug info makes the GUI binary ~350 MB; line tables keep backtraces readable.

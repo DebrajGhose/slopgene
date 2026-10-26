@@ -23,8 +23,9 @@ A digest, a PCR or a map therefore gives the same result in every program.
 |---|---|---|
 | `slopgene-core` | serde, lzma-rs, thiserror | Document model, file formats, algorithms, map layout |
 | `slopgene-script` | core, rhai, resvg | The Rhai engine with SlopGene's functions, and PNG export |
-| `slopgene-cli` | core, script, clap, rayon | The `slopgene` command |
-| `slopgene-gui` | core, script, eframe (egui with wgpu), rfd | The `slopgene-gui` desktop app |
+| `slopgene-cli` | core, script, update, clap, rayon | The `slopgene` command |
+| `slopgene-gui` | core, script, update, eframe (egui with wgpu), rfd | The `slopgene-gui` desktop app |
+| `slopgene-update` | serde, ureq (with rustls), sha2 | Finding the newest release on GitHub, downloading it with its checksum checked, and installing it the way this copy was installed |
 
 The core has no graphics, terminal or network dependency.
 It compiles anywhere Rust does, which keeps the algorithms testable without a display.
@@ -163,6 +164,7 @@ It bundles its fonts (Inter and JetBrains Mono), so it looks the same on every s
 | `panels.rs` | The inspector: selection details, the feature editor, lists of features, enzymes and primers |
 | `scene_paint.rs` | Painting a `Scene` with egui, and hit-testing its tagged shapes |
 | `record.rs` | Playing a script of pointer and key actions into the window with a cursor drawn (`--play`), and recording the frames into an animated GIF (`--record`), for pictures of the app and the README's animations |
+| `update_view.rs` | The check for a newer version on a thread, the Update button's dialog, and the download and install through `slopgene-update` |
 | `style.rs` | Fonts, colours and spacing |
 
 Each document keeps up to 200 undo steps as snapshots of the whole `Document`.
