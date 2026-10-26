@@ -116,6 +116,9 @@ pub struct DocTab {
     last_edit: Option<(String, Instant)>,
     /// Sequencing results and other sequences aligned to this document.
     pub alignments: crate::align_view::Alignments,
+    /// The bases cannot be typed or deleted here, as in the sequence shown under a protocol's
+    /// map. Selecting, copying and moving the cursor still work.
+    pub read_only: bool,
 }
 
 fn mtime(path: &Path) -> Option<SystemTime> {
@@ -149,6 +152,7 @@ impl DocTab {
             notice: None,
             last_edit: None,
             alignments: crate::align_view::Alignments::default(),
+            read_only: false,
         }
     }
 

@@ -669,6 +669,21 @@ fn register_protocols(engine: &mut Engine) {
         let way = Orientation::parse(way).ok_or_else(|| format!("the way is forward, reverse or either (got '{way}')"))?;
         change_protocol(path, Change::Turn { piece: piece.into(), join: join.into(), way })
     });
+    engine.register_fn("protocol_copy_out", |path: &str, step: &str| -> R<Dynamic> { change_protocol(path, Change::CopyOut { step: step.into() }) });
+    engine.register_fn("protocol_cut_out", |path: &str, step: &str| -> R<Dynamic> { change_protocol(path, Change::CutOut { step: step.into() }) });
+    engine.register_fn("protocol_primers", |path: &str, step: &str, options: Map| -> R<Dynamic> {
+        // A pair number keeps one of the pairs the run designs, forward and reverse give two
+        // primers of one's own, and clear designs them anew.
+        let pair = match options.get("pair").filter(|v| !v.is_unit()) {
+            Some(value) => Some(usize_of(value.as_int().map_err(|_| "pair must be a number")?, "pair")?),
+            None => None,
+        };
+        let (forward, reverse) = (text_option(&options, "forward"), text_option(&options, "reverse"));
+        if pair.is_none() && forward.is_none() && reverse.is_none() && !flag_option(&options, "clear") {
+            return Err("say what to do with the primers: pair, forward and reverse, or clear: true".into());
+        }
+        change_protocol(path, Change::Primers { step: step.into(), pair, forward, reverse })
+    });
 }
 
 /// A protocol's run as a script value: what `slopgene protocol run --json` reports, with the
@@ -709,7 +724,7 @@ fn flag_option(options: &Map, key: &str) -> bool {
 }
 
 /// Write a new restriction-cloning protocol file and run it. Options: `enzymes`,
-/// `vector_enzymes`, `cut_out`, `replace`, `name`, `keep_phosphates` and `force`, as for
+/// `vector_enzymes`, `cut_out`, `replace`, `name`, `keep_phosphates`, `pcr` and `force`, as for
 /// `slopgene protocol new`.
 fn protocol_new(path: &str, vector: &str, insert: &str, options: Map) -> R<Dynamic> {
     let new = NewFile {
@@ -721,16 +736,19 @@ fn protocol_new(path: &str, vector: &str, insert: &str, options: Map) -> R<Dynam
         replace: text_option(&options, "replace"),
         name: text_option(&options, "name"),
         dephosphorylate: !flag_option(&options, "keep_phosphates"),
+        pcr: flag_option(&options, "pcr"),
     };
     let path = PathBuf::from(path);
     let (plan, ran) = core(protocol::write_new(&path, &new, flag_option(&options, "force"), db()))?;
     Ok(run_value(&path, &plan, &ran, None))
 }
 
-/// Add a map to cut a piece from. Options: `cut_out` (the part) and `enzymes`.
+/// Add a map to cut a piece from, or with `pcr` to copy a piece from. Options: `cut_out` (the
+/// part), `enzymes` and `pcr`.
 fn protocol_add(path: &str, map: &str, options: Map) -> R<Dynamic> {
     let enzymes = enzyme_names(&text_option(&options, "enzymes").unwrap_or_default())?;
-    change_protocol(path, Change::AddMap { map: map.into(), cut_out: text_option(&options, "cut_out"), enzymes })
+    let pcr = flag_option(&options, "pcr");
+    change_protocol(path, Change::AddMap { map: map.into(), cut_out: text_option(&options, "cut_out"), enzymes, pcr })
 }
 
 fn register_utilities(engine: &mut Engine) {
@@ -867,6 +885,65 @@ mod tests {
         assert!(e.contains("neither a map the protocol opens nor a join"), "{e}");
         let e = eval(&format!(r#"protocol_turn("{}/geneX.json", "insert", "product", "sideways")"#, folder.to_string_lossy().replace('\\', "/"))).unwrap_err();
         assert!(e.contains("forward, reverse or either"), "{e}");
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    #[test]
+    fn a_pcr_lane_is_made_and_changed_by_scripts() {
+        // Random bases, so primers anneal in one place, without the sites of EcoRI, BamHI or
+        // BglII, which the vector then carries on purpose.
+        fn random_dna(n: usize, mut x: u64) -> String {
+            (0..n)
+                .map(|_| {
+                    x = x.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+                    b"ACGT"[(x >> 33) as usize % 4] as char
+                })
+                .collect()
+        }
+        let clean = |seed: u64| (seed..).map(|s| random_dna(1000, s)).find(|s| !["GAATTC", "GGATCC", "AGATCT"].iter().any(|site| s.contains(site))).unwrap();
+        let donor = clean(1);
+        let vector = format!("{}GAATTC{}GGATCC{}", clean(2), &clean(3)[..20], clean(4));
+        let folder = std::env::temp_dir().join(format!("slopgene-script-pcr-{}", std::process::id()));
+        std::fs::create_dir_all(&folder).unwrap();
+        let script = format!(
+            r#"
+            let dir = "{dir}";
+            let donor = new_dna("donor", "{donor}", "circular");
+            donor.add_feature("geneX", "CDS", 301, 600, "forward");
+            donor.save(`${{dir}}/donor.gb`);
+            new_dna("vector", "{vector}", "circular").save(`${{dir}}/vector.gb`);
+            let file = `${{dir}}/geneX.json`;
+            let made = protocol_new(file, `${{dir}}/vector.gb`, `${{dir}}/donor.gb`, #{{ cut_out: "geneX", enzymes: "EcoRI,BamHI", pcr: true }});
+            let copy = made.steps[5];
+            let kept = protocol_primers(file, "pcr_donor", #{{ pair: 2 }});
+            let own = protocol_primers(file, "pcr_donor", #{{ forward: copy.primers[0].sequence, reverse: copy.primers[1].sequence }});
+            let anew = protocol_primers(file, "pcr_donor", #{{ clear: true }});
+            let back = protocol_cut_out(file, "donor");
+            let again = protocol_copy_out(file, "donor");
+            let added = protocol_add(file, `${{dir}}/donor.gb`, #{{ cut_out: "geneX", enzymes: "EcoRI,BamHI", pcr: true }});
+            [copy.type, copy.primers.len(), copy.primer_pairs[0].pair, kept.changed.sub_string(0, 29), own.changed, anew.changed, back.changed, again.changed, added.changed, made.steps[made.steps.len() - 1].status]
+            "#,
+            dir = folder.to_string_lossy().replace('\\', "/"),
+        );
+        let result = eval(&script).unwrap();
+        let values: Vec<String> = result.into_array().unwrap().into_iter().map(|v| v.to_string()).collect();
+        assert_eq!(
+            values,
+            vec![
+                "amplify",
+                "2",
+                "1",
+                "pcr_donor keeps primer pair 2",
+                "pcr_donor uses the primers given",
+                "pcr_donor designs its primers anew",
+                "cut_pcr cuts the part out of donor again, without a PCR",
+                "pcr_donor copies the part out of donor by PCR, and cut_pcr trims its tails",
+                "added donor as donor_2, copied out by PCR; insert_2 keeps its piece",
+                "done",
+            ]
+        );
+        let e = eval(&format!(r#"protocol_primers("{}/geneX.json", "pcr_donor", #{{}})"#, folder.to_string_lossy().replace('\\', "/"))).unwrap_err();
+        assert!(e.contains("say what to do with the primers"), "{e}");
         let _ = std::fs::remove_dir_all(&folder);
     }
 

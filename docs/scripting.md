@@ -345,10 +345,10 @@ print(`${piece.length} bp, ${piece.left.end} / ${piece.right.end}`);
 |---|---|
 | `protocol_run(path) -> map` | Run a protocol file and report every step, as `slopgene protocol run --json` does. |
 | `protocol_new(path, vector, insert) -> map` | Write a protocol that cuts a piece out of the insert's map and puts it into the vector, then run it. |
-| `protocol_new(path, vector, insert, options) -> map` | The same, with the options enzymes, vector_enzymes, cut_out, replace, name, keep_phosphates and force. |
+| `protocol_new(path, vector, insert, options) -> map` | The same, with the options enzymes, vector_enzymes, cut_out, replace, name, keep_phosphates, pcr (copy the insert out by PCR) and force. |
 | `protocol_add(path, map) -> map` | Add a map to cut a piece from. Its cut waits for a part and enzymes. |
-| `protocol_add(path, map, options) -> map` | The same, with the options cut_out (the part) and enzymes. |
-| `protocol_cut(path, step, options) -> map` | Change a cut's part, its enzymes or both, with the options part and enzymes (`""` clears either). |
+| `protocol_add(path, map, options) -> map` | The same, with the options cut_out (the part), enzymes and pcr (copy the part out by PCR). |
+| `protocol_cut(path, step, options) -> map` | Change a cut's part, its enzymes or both, with the options part and enzymes (`""` clears either). For a PCR step, the part it copies and the enzymes on its primers' tails. |
 | `protocol_keep(path, pick, piece) -> map` | Make a pick keep another piece of its cut, counted from 1 along the cut map. |
 | `protocol_put(path, piece, into) -> map` | Put a kept piece into a map, which is cut with the piece's enzymes, or into a join. |
 | `protocol_take_out(path, piece, join) -> map` | Take a piece out of a join. |
@@ -356,6 +356,9 @@ print(`${piece.length} bp, ${piece.left.end} / ${piece.right.end}`);
 | `protocol_leave_out(path, step) -> map` | Leave out a step that has one input, and pass that input on. |
 | `protocol_dephosphorylate(path, piece, join) -> map` | Take the 5' phosphates off a piece on its way into a join. |
 | `protocol_turn(path, piece, join, way) -> map` | Say which way a piece goes into a join: "forward", "reverse" or "either". |
+| `protocol_copy_out(path, step) -> map` | Copy a map's part out by PCR instead of cutting it out: a PCR step goes between the map and its cut, with the cut's enzymes on the primers' tails. |
+| `protocol_cut_out(path, step) -> map` | Cut a map's part out instead of copying it by PCR, the reverse of `protocol_copy_out`. |
+| `protocol_primers(path, step, options) -> map` | The primers of a PCR step: `pair` keeps pair N of those the run designs, `forward` and `reverse` give your own, and `clear: true` designs them anew. |
 
 These functions make the changes the app's protocol bench makes with the mouse.
 Each one changes the file, writes it back and runs it.
@@ -368,6 +371,13 @@ Maps are paths from the working folder, and the protocol stores them relative to
 `protocol_put` onto a map cuts that map with the piece's own enzymes, so the ends match.
 It keeps the map's largest piece as the backbone and takes its 5' phosphates off.
 `protocol_leave_out(path, "cip")` puts the phosphates back.
+
+A PCR lane copies the part out of its map instead of cutting it out.
+`protocol_new` and `protocol_add` make one with `pcr: true`, and `protocol_copy_out` turns a cut lane into one.
+Its steps are the map, the PCR (`pcr_donor`), the cut that trims the primers' tails (`cut_pcr`) and the pick (`insert`).
+The PCR's enzymes go on the primers' tails, the forward primer's first, and the cut uses the same enzymes.
+The run reports the PCR's `primers`, each with its sequence and where it anneals, and the `primer_pairs` it designed, best first.
+The primers are designed anew on each run until `protocol_primers` keeps a pair, after which every run checks them against the part.
 
 A join's `byproducts` list the other molecules its tube makes, such as the insert the other way round or the backbone closed on itself.
 Each one has a `description` in plain words and the `pieces` it holds in order, each with `turned_round`.

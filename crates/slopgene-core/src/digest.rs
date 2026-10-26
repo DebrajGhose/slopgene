@@ -114,11 +114,14 @@ pub fn digest(doc: &Document, enzymes: &[&Enzyme]) -> Result<Digest> {
         let start = start.rem_euclid(seq_len as i64) as usize;
         let span = Span::new(start, start + len);
         let mut piece = edit::extract(doc, span)?;
+        // A cut leaves a 5' phosphate. An original end of a linear molecule stays as it was, so a
+        // PCR product's unphosphorylated ends do not gain phosphates by being cut near.
+        let modification = |cut: bool, original: &Option<String>| if cut { Some("FivePrimePhosphorylated".into()) } else { original.clone() };
         piece.ends = Ends {
             left: left_end,
             right: right_end,
-            left_modification: Some("FivePrimePhosphorylated".into()),
-            right_modification: Some("FivePrimePhosphorylated".into()),
+            left_modification: modification(left.is_some(), &doc.ends.left_modification),
+            right_modification: modification(right.is_some(), &doc.ends.right_modification),
         };
         let label = |side: Option<(Cut, &str)>| side.map(|(_, e)| e.to_string());
         piece.name = format!("{} {}-{} fragment", doc.name, label(left).unwrap_or_else(|| "end".into()), label(right).unwrap_or_else(|| "end".into()))

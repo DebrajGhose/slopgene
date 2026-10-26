@@ -1,6 +1,7 @@
-//! Cloning protocols: write a restriction-cloning protocol for a vector and an insert, run a
-//! protocol step by step, settling the steps that wait for a choice, and make the changes the
-//! app's bench makes (add a map, change a cut, put a piece somewhere, take one out).
+//! Cloning protocols: write a restriction-cloning protocol for a vector and an insert (the insert
+//! cut out of its map, or copied out by PCR), run a protocol step by step, settling the steps
+//! that wait for a choice, and make the changes the app's bench makes (add a map, change a cut,
+//! put a piece somewhere, take one out, switch a lane between cutting and PCR, keep primers).
 
 use crate::enzyme_cmd::choose_enzymes;
 use crate::util::*;
@@ -79,7 +80,11 @@ fn report(path: &Path, plan: &Protocol, ran: &Run, written: &[String], out_dir: 
     let mut text = format!("{}\n", if plan.name.is_empty() { path_text(path) } else { plan.name.clone() });
     text.push_str(&ran.text(plan));
     for step in ran.steps.iter().filter(|s| s.status == Status::NeedsChoice) {
-        if step.choices.is_empty() {
+        if step.choices.is_empty() && matches!(plan.step(&step.id).map(|s| &s.action), Some(Action::Amplify(_))) {
+            // A PCR without a part: the part goes into the file with `protocol cut --part`.
+            let file = path_text(path);
+            text.push_str(&format!("{} waits for the part to copy: `slopgene protocol cut {file} {} --part NAME` names it\n", step.id, step.id));
+        } else if step.choices.is_empty() {
             // A cut without enzymes: the enzymes go into the file, and `excise` lists the nearest.
             text.push_str(&format!("{} waits for its enzymes: `slopgene excise` lists the nearest on each side of its part\n", step.id));
         } else {
@@ -109,6 +114,8 @@ pub struct CloningPlan<'a> {
     pub replace: Option<&'a str>,
     pub name: Option<&'a str>,
     pub keep_phosphates: bool,
+    /// Copy the insert out by PCR, with the enzymes' sites on the primers, rather than cut it out.
+    pub pcr: bool,
     pub force: bool,
 }
 
@@ -129,6 +136,7 @@ pub fn new_cloning(plan: &CloningPlan) -> Result<Output> {
         replace: plan.replace.map(str::to_string),
         name: plan.name.map(str::to_string),
         dephosphorylate: !plan.keep_phosphates,
+        pcr: plan.pcr,
     };
     let (protocol, ran) = protocol::write_new(&path, &new, true, enzyme_db())?;
     let mut output = report(&path, &protocol, &ran, &[], None, false);
@@ -137,9 +145,9 @@ pub fn new_cloning(plan: &CloningPlan) -> Result<Output> {
     Ok(output)
 }
 
-/// `slopgene protocol add|cut|keep|put|take-out|remove-map|leave-out|dephosphorylate|turn`: make `change`
-/// to the protocol file at `path`, write it back and run it. The report starts with what
-/// changed. A change that fails leaves the file alone.
+/// `slopgene protocol add|cut|keep|put|take-out|remove-map|leave-out|dephosphorylate|turn|copy-out|cut-out|primers`:
+/// make `change` to the protocol file at `path`, write it back and run it. The report starts
+/// with what changed. A change that fails leaves the file alone.
 pub fn change(path: &str, change: Change) -> Result<Output> {
     let path = PathBuf::from(path);
     let (plan, ran, said) = protocol::change_file(&path, enzyme_db(), &change)?;

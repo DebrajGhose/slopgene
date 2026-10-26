@@ -28,18 +28,29 @@
 //! molecule it was cut from, and a ligation records which stretch of the product each piece
 //! became, so a picture can show where the parts went.
 //!
+//! An `amplify` step copies a part of a molecule by PCR instead of cutting it out. It designs
+//! primers for the part (`primer_design::design_pairs`), puts the sites of the chosen enzymes on
+//! their 5' tails, and makes the product (`pcr::pcr`). A digest of the product then trims the
+//! tails, and the piece between them goes into the vector like any restriction fragment. The
+//! primers are designed anew on every run until a pair is kept, which writes them into the step,
+//! where they are then checked against the part on every run. A PCR product carries no 5'
+//! phosphates, as primers are made without them.
+//!
 //! [`story`] tells each step in plain words (what it does, why, and what came of it), so the app,
 //! the command line and scripts describe a protocol the same way.
 //!
 //! Protocols are saved as `slopgene.protocol/1` JSON.
 
-use crate::alphabet::same_circle;
+use crate::alphabet::{self, same_circle};
 use crate::digest::{circularize, digest, ends_compatible, ligate, overhang_bases};
 use crate::edit;
 use crate::enzymes::{EnzymeDb, cut_counts, find_sites};
 use crate::error::{Error, Result};
 use crate::json;
 use crate::model::*;
+use crate::pcr;
+use crate::primer_design::{DesignOptions, SITE_PADDING, design_pairs, site_tail};
+use crate::primers::BindingRules;
 use crate::render::thousands;
 use crate::span::{Span, parse_range};
 use serde::{Deserialize, Serialize};
@@ -107,6 +118,8 @@ pub enum Action {
     Open(OpenParams),
     /// Cut one molecule with restriction enzymes.
     Digest(DigestParams),
+    /// Copy a part of one molecule by PCR, with enzyme sites on the primers' 5' tails.
+    Amplify(AmplifyParams),
     /// Choose one fragment of a digest.
     Pick(PickParams),
     /// Remove the 5' phosphates of a linear fragment, so it cannot close on itself.
@@ -124,6 +137,7 @@ impl Action {
     pub const KINDS: &'static [(&'static str, &'static str)] = &[
         ("open", "Start from a plasmid or other map"),
         ("digest", "Cut it with restriction enzymes"),
+        ("amplify", "Copy a part of it by PCR, with enzyme sites on the primers"),
         ("pick", "Keep one of the pieces"),
         ("dephosphorylate", "Remove the 5' phosphates, so a backbone cannot close on itself"),
         ("flip", "Turn a piece round"),
@@ -135,6 +149,7 @@ impl Action {
         Some(match name {
             "open" => Action::Open(OpenParams::default()),
             "digest" => Action::Digest(DigestParams::default()),
+            "amplify" => Action::Amplify(AmplifyParams::default()),
             "pick" => Action::Pick(PickParams::default()),
             "dephosphorylate" => Action::Dephosphorylate(NoParams {}),
             "flip" => Action::Flip(NoParams {}),
@@ -148,6 +163,7 @@ impl Action {
         match self {
             Action::Open(_) => "Start",
             Action::Digest(_) => "Cut",
+            Action::Amplify(_) => "Copy",
             Action::Pick(_) => "Keep",
             Action::Dephosphorylate(_) => "Remove phosphates",
             Action::Flip(_) => "Turn round",
@@ -159,6 +175,7 @@ impl Action {
     pub fn lab_term(&self) -> Option<&'static str> {
         match self {
             Action::Digest(_) => Some("restriction digest"),
+            Action::Amplify(_) => Some("PCR"),
             Action::Pick(_) => Some("gel extraction"),
             Action::Dephosphorylate(_) => Some("dephosphorylation"),
             Action::Ligate(_) => Some("ligation"),
@@ -168,7 +185,7 @@ impl Action {
 
     /// Whether the step works on exactly one molecule (a ligation takes several, an open none).
     pub fn takes_one_input(&self) -> bool {
-        matches!(self, Action::Digest(_) | Action::Pick(_) | Action::Dephosphorylate(_) | Action::Flip(_))
+        matches!(self, Action::Digest(_) | Action::Amplify(_) | Action::Pick(_) | Action::Dephosphorylate(_) | Action::Flip(_))
     }
 
     /// The step type's name, as protocol files write it.
@@ -176,6 +193,7 @@ impl Action {
         match self {
             Action::Open(_) => "open",
             Action::Digest(_) => "digest",
+            Action::Amplify(_) => "amplify",
             Action::Pick(_) => "pick",
             Action::Dephosphorylate(_) => "dephosphorylate",
             Action::Flip(_) => "flip",
@@ -210,6 +228,63 @@ pub struct DigestParams {
     /// inside it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub around: Option<String>,
+}
+
+/// What an `amplify` step copies, the enzyme sites on its primers' tails, and the primers.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AmplifyParams {
+    /// The part of the molecule to copy: a feature's name, or a 1-based range such as
+    /// "389..1108". The primers anneal at its two ends.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub region: Option<String>,
+    /// The enzymes whose sites the primers carry on their 5' tails, so the product can be cut to
+    /// fit a vector: one for the forward primer and one for the reverse primer. A primer without
+    /// one has no tail.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub forward_enzyme: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reverse_enzyme: Option<String>,
+    /// The primers, 5' to 3' with their tails, once a pair is kept or typed. Without them the
+    /// run designs pairs for the part and uses the best.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub forward_primer: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reverse_primer: Option<String>,
+}
+
+impl AmplifyParams {
+    /// The tail enzymes as a list, the forward primer's first and each once: the enzymes a
+    /// digest of the product cuts with.
+    pub fn enzymes(&self) -> Vec<String> {
+        let mut names: Vec<String> = Vec::new();
+        for name in [&self.forward_enzyme, &self.reverse_enzyme].into_iter().flatten() {
+            if !names.iter().any(|n| n.eq_ignore_ascii_case(name)) {
+                names.push(name.clone());
+            }
+        }
+        names
+    }
+
+    /// Give the tails these enzymes: the forward primer's, then the reverse primer's. One name
+    /// puts the same site on both primers, and none takes the tails off. More than two is an
+    /// error, as two primers have two tails.
+    pub fn set_enzymes(&mut self, enzymes: &[String]) -> Result<()> {
+        let (forward, reverse) = match enzymes {
+            [] => (None, None),
+            [one] => (Some(one.clone()), Some(one.clone())),
+            [forward, reverse] => (Some(forward.clone()), Some(reverse.clone())),
+            more => return Err(Error::Invalid(format!("two primers have two tails, so {} enzymes are too many", more.len()))),
+        };
+        self.forward_enzyme = forward;
+        self.reverse_enzyme = reverse;
+        Ok(())
+    }
+
+    /// Whether the primers are kept in the step, rather than designed anew on each run.
+    pub fn pinned(&self) -> bool {
+        self.forward_primer.is_some() && self.reverse_primer.is_some()
+    }
 }
 
 /// How a `pick` step recognises its fragment. Every criterion given must hold.
@@ -396,7 +471,11 @@ impl Protocol {
     /// choices sits in a step's parameters, where it can be changed.
     pub fn restriction_cloning(template: &CloningTemplate) -> Protocol {
         let mut protocol = Protocol { name: template.name.clone(), description: template.description.clone(), ..Protocol::default() };
-        let kept = protocol.add_source(template.donor.clone(), template.insert_enzymes.clone(), template.insert.clone());
+        let kept = if template.pcr {
+            protocol.add_template(template.donor.clone(), template.insert_enzymes.clone(), template.insert.clone())
+        } else {
+            protocol.add_source(template.donor.clone(), template.insert_enzymes.clone(), template.insert.clone())
+        };
         // A known length tells the insert from other fragments with the same ends.
         if let Some(Step { action: Action::Pick(pick), .. }) = protocol.steps.last_mut() {
             pick.size = template.insert_size;
@@ -426,6 +505,24 @@ impl Protocol {
         }
         self.steps.push(new_step(source, &[], Action::Open(open), ""));
         self.steps.push(new_step(cut, &[source], Action::Digest(DigestParams { enzymes, around: part }), ""));
+        self.steps.push(new_step(kept, &[cut], Action::Pick(pick), ""));
+        kept.to_string()
+    }
+
+    /// Start from another map and copy a part of it out by PCR: open it, copy `part` with
+    /// primers whose 5' tails carry the sites of `enzymes` (the forward primer's first), cut the
+    /// product with those enzymes to trim the tails, and keep the piece between them. Returns the
+    /// id of the step that keeps it. The part and the enzymes can both be named later.
+    pub fn add_template(&mut self, open: OpenParams, enzymes: Vec<String>, part: Option<String>) -> String {
+        let ids = [self.new_id("donor"), self.new_id("pcr_donor"), self.new_id("cut_pcr"), self.new_id("insert")];
+        let [source, copy, cut, kept] = ids.each_ref().map(String::as_str);
+        let mut params = AmplifyParams { region: part.clone(), ..AmplifyParams::default() };
+        // Two primers carry two tails, so a longer list is cut to its first two enzymes.
+        let _ = params.set_enzymes(&enzymes[..enzymes.len().min(2)]);
+        let (around, pick) = pcr_lane_criteria(part.as_deref());
+        self.steps.push(new_step(source, &[], Action::Open(open), ""));
+        self.steps.push(new_step(copy, &[source], Action::Amplify(params.clone()), ""));
+        self.steps.push(new_step(cut, &[copy], Action::Digest(DigestParams { enzymes: params.enzymes(), around }), TRIM_NOTE));
         self.steps.push(new_step(kept, &[cut], Action::Pick(pick), ""));
         kept.to_string()
     }
@@ -677,38 +774,90 @@ impl Protocol {
         self.steps.push(new_step(product, &[joined, insert], Action::Ligate(LigateParams::default()), ""));
     }
 
-    /// Change the enzymes of digest `id`. The picks that take its pieces are released from the
-    /// piece they were pinned to, since the pieces change, and those that named the old enzymes
-    /// as their ends name the new ones. With `follow`, every other digest that used the same
-    /// enzymes as this one gets the new ones too, as a vector cut with the insert's enzymes does.
-    /// A digest that cuts out a part of its own, as a second insert's does, keeps its enzymes.
+    /// Change the enzymes of digest `id`, or the tail enzymes of PCR step `id`. The picks that
+    /// take the changed pieces are released from the piece they were pinned to, since the pieces
+    /// change, and those that named the old enzymes as their ends name the new ones. A PCR and
+    /// the cut that trims its tails change together, whichever is named, and new tails bring new
+    /// primers. With `follow`, as when an insert's cut changes, every other digest that used the
+    /// same enzymes gets the new ones too, as a vector cut with the insert's enzymes does. A
+    /// digest that cuts out a part of its own, as a second insert's does, keeps its enzymes.
+    /// Without `follow`, as when a vector's cut changes, the PCRs whose tails carried the same
+    /// enzymes take the new ones, since a tail can carry any site, while a donor's cut is tied to
+    /// its own sites and keeps them.
     pub fn set_enzymes(&mut self, id: &str, enzymes: Vec<String>, follow: bool) -> Result<()> {
-        let Some(Action::Digest(params)) = self.step(id).map(|s| &s.action) else {
-            return Err(Error::Invalid(format!("{id} is not a cut")));
+        self.change_enzymes(id, enzymes, None, follow)
+    }
+
+    /// Give PCR step `id` these tail enzymes, the forward primer's and the reverse primer's,
+    /// either of which may be none, and carry them to the cut that trims the tails and to the
+    /// steps that follow, as [`Protocol::set_enzymes`] does. A click on an enzyme for one primer
+    /// in the app sets the tails this way.
+    pub fn set_tails(&mut self, id: &str, forward: Option<String>, reverse: Option<String>, follow: bool) -> Result<()> {
+        if !matches!(self.step(id).map(|s| &s.action), Some(Action::Amplify(_))) {
+            return Err(Error::Invalid(format!("{id} is not a PCR")));
+        }
+        let mut list: Vec<String> = Vec::new();
+        for name in [&forward, &reverse].into_iter().flatten() {
+            if !list.iter().any(|n| n.eq_ignore_ascii_case(name)) {
+                list.push(name.clone());
+            }
+        }
+        self.change_enzymes(id, list, Some((forward, reverse)), follow)
+    }
+
+    /// The work of [`Protocol::set_enzymes`] and [`Protocol::set_tails`]. `tails` gives the two
+    /// tail enzymes of PCR step `id` as given, when the list came from them.
+    fn change_enzymes(&mut self, id: &str, enzymes: Vec<String>, tails: Option<(Option<String>, Option<String>)>, follow: bool) -> Result<()> {
+        // The step and its lane mate, and the enzymes they had.
+        let (amplify, digest, old) = match self.step(id).map(|s| &s.action) {
+            Some(Action::Digest(d)) => (self.amplify_before(id).map(str::to_string), Some(id.to_string()), d.enzymes.clone()),
+            Some(Action::Amplify(a)) => (Some(id.to_string()), self.digest_after(id).map(str::to_string), a.enzymes()),
+            _ => return Err(Error::Invalid(format!("{id} is neither a cut nor a PCR"))),
         };
-        let old = params.enzymes.clone();
-        // The digests to change: this one, and the ones that follow it.
-        let mut changed: Vec<String> = vec![id.to_string()];
-        if follow {
-            for step in &self.steps {
-                if let Action::Digest(other) = &step.action
-                    && step.id != id
-                    && same_names(&other.enzymes, &old)
-                    && part_role(self, &step.id) != Some(PartRole::Keep)
-                {
-                    changed.push(step.id.clone());
+        if amplify.is_some() && enzymes.len() > 2 {
+            return Err(Error::Invalid(format!("two primers have two tails, so {} enzymes are too many", enzymes.len())));
+        }
+        let mut digests: Vec<String> = digest.into_iter().collect();
+        let mut amplifies: Vec<String> = amplify.into_iter().collect();
+        for step in &self.steps {
+            if step.id == id || digests.contains(&step.id) || amplifies.contains(&step.id) {
+                continue;
+            }
+            match &step.action {
+                Action::Digest(other) if follow && same_names(&other.enzymes, &old) && part_role(self, &step.id) != Some(PartRole::Keep) => {
+                    digests.push(step.id.clone());
                 }
+                Action::Amplify(other) if !follow && same_names(&other.enzymes(), &old) => {
+                    amplifies.push(step.id.clone());
+                    if let Some(cut) = self.digest_after(&step.id) {
+                        digests.push(cut.to_string());
+                    }
+                }
+                _ => {}
             }
         }
         let ends = (1..=2).contains(&enzymes.len()).then(|| enzymes.join("/"));
         for step in &mut self.steps {
-            if let Action::Digest(params) = &mut step.action
-                && changed.contains(&step.id)
-            {
-                params.enzymes = enzymes.clone();
+            let this = step.id.clone();
+            match &mut step.action {
+                Action::Digest(params) if digests.contains(&this) => params.enzymes = enzymes.clone(),
+                Action::Amplify(params) if amplifies.contains(&this) => {
+                    // The PCR named takes its tails as given. A PCR that follows takes the list.
+                    match &tails {
+                        Some((forward, reverse)) if this == id => {
+                            params.forward_enzyme = forward.clone();
+                            params.reverse_enzyme = reverse.clone();
+                        }
+                        _ => params.set_enzymes(&enzymes)?,
+                    }
+                    // New tails need new primers.
+                    params.forward_primer = None;
+                    params.reverse_primer = None;
+                }
+                _ => {}
             }
             // A pick of the changed pieces starts afresh from its criteria.
-            let takes_changed = step.inputs.iter().any(|input| changed.iter().any(|c| split_reference(input).0 == c));
+            let takes_changed = step.inputs.iter().any(|input| digests.iter().any(|c| split_reference(input).0 == c));
             if let Action::Pick(pick) = &mut step.action
                 && takes_changed
             {
@@ -721,13 +870,189 @@ impl Protocol {
         Ok(())
     }
 
-    /// Name the part digest `id` is about: a feature's name or a 1-based range, or none. The
-    /// picks that kept the old part keep the new one.
-    pub fn set_part(&mut self, id: &str, part: Option<String>) -> Result<()> {
-        let Some(Action::Digest(params)) = self.step(id).map(|s| &s.action) else {
-            return Err(Error::Invalid(format!("{id} is not a cut")));
+    /// The PCR step whose product digest `id` cuts, when it cuts one.
+    pub fn amplify_before(&self, id: &str) -> Option<&str> {
+        let step = self.step(id)?;
+        if !matches!(step.action, Action::Digest(_)) {
+            return None;
+        }
+        let input = self.step(split_reference(step.inputs.first()?).0)?;
+        matches!(input.action, Action::Amplify(_)).then_some(input.id.as_str())
+    }
+
+    /// The digest that cuts the product of PCR step `id`, when one does.
+    pub fn digest_after(&self, id: &str) -> Option<&str> {
+        if !matches!(self.step(id)?.action, Action::Amplify(_)) {
+            return None;
+        }
+        self.steps.iter().find(|s| matches!(s.action, Action::Digest(_)) && s.inputs.first().is_some_and(|r| split_reference(r).0 == id)).map(|s| s.id.as_str())
+    }
+
+    /// Name the part PCR step `id` copies: a feature's name or a 1-based range, or none. The
+    /// primers are designed anew for it. The cut of the product is about it when it is a
+    /// feature, which the product carries, and the pick keeps that feature's piece, or else the
+    /// largest piece, which the piece between the tails always is.
+    fn set_region(&mut self, id: &str, part: Option<String>) -> Result<()> {
+        let digest = self.digest_after(id).map(str::to_string);
+        let (around, pick) = pcr_lane_criteria(part.as_deref());
+        for step in &mut self.steps {
+            if step.id == id
+                && let Action::Amplify(params) = &mut step.action
+            {
+                params.region = part.clone();
+                params.forward_primer = None;
+                params.reverse_primer = None;
+            }
+        }
+        let Some(digest) = digest else { return Ok(()) };
+        for step in &mut self.steps {
+            if step.id == digest
+                && let Action::Digest(params) = &mut step.action
+            {
+                params.around = around.clone();
+            }
+            let takes = step.inputs.iter().any(|r| split_reference(r).0 == digest);
+            if takes && let Action::Pick(p) = &mut step.action {
+                *p = pick.clone();
+            }
+        }
+        Ok(())
+    }
+
+    /// The open step and the first cut of the lane step `id` is in, whichever step of the lane
+    /// `id` is.
+    fn lane_cut(&self, id: &str) -> Result<(String, String)> {
+        let open = self.source_of(id).ok_or_else(|| Error::Invalid(format!("no step is called {id}, or it works on no map")))?.to_string();
+        let mut end = open.clone();
+        // A lane a few dozen steps long is far longer than any protocol, and stops a loop.
+        for _ in 0..32 {
+            let next = self
+                .steps
+                .iter()
+                .find(|s| !matches!(s.action, Action::Ligate(_) | Action::Open(_)) && s.inputs.first().is_some_and(|r| split_reference(r).0 == end));
+            match next {
+                Some(step) if matches!(step.action, Action::Digest(_)) => return Ok((open, step.id.clone())),
+                Some(step) => end = step.id.clone(),
+                None => break,
+            }
+        }
+        Err(Error::Invalid(format!("{open} is not cut, so its lane has no part to cut out or copy out")))
+    }
+
+    /// Copy the part of step `id`'s map out by PCR instead of cutting it out. `id` is any step of
+    /// the lane: the map's open step, its cut or its pick. A PCR step goes in between the map and
+    /// the cut, with the cut's part and the cut's enzymes on its primers' tails, and the cut then
+    /// trims the product's tails. Returns the PCR step's id.
+    pub fn copy_out(&mut self, id: &str) -> Result<String> {
+        let (open, cut) = self.lane_cut(id)?;
+        if self.amplify_before(&cut).is_some() {
+            return Err(Error::Invalid(format!("{cut} already cuts a PCR product")));
+        }
+        if part_role(self, &cut) == Some(PartRole::Replace) {
+            return Err(Error::Invalid(format!("{cut} takes a part out of {open} for an insert to replace, so there is no part to copy")));
+        }
+        let Some(Action::Digest(params)) = self.step(&cut).map(|s| s.action.clone()) else { unreachable!("lane_cut finds a digest") };
+        let mut amplify = AmplifyParams { region: params.around.clone(), ..AmplifyParams::default() };
+        amplify
+            .set_enzymes(&params.enzymes)
+            .map_err(|_| Error::Invalid(format!("{cut} has {} enzymes, and two primers carry two tails", params.enzymes.len())))?;
+        let copy = self.new_id(&format!("pcr_{open}"));
+        let at = self.steps.iter().position(|s| s.id == cut).unwrap_or(self.steps.len());
+        self.steps.insert(at, new_step(&copy, &[&open], Action::Amplify(amplify), ""));
+        // The cut now trims the product's tails, and the picks keep the copy's piece.
+        let (around, pick) = pcr_lane_criteria(params.around.as_deref());
+        for step in &mut self.steps {
+            if step.id == cut {
+                step.inputs = vec![copy.clone()];
+                if let Action::Digest(d) = &mut step.action {
+                    d.around = around.clone();
+                }
+                if step.note.is_empty() {
+                    step.note = TRIM_NOTE.into();
+                }
+            }
+            let takes = step.inputs.iter().any(|r| split_reference(r).0 == cut);
+            if takes && let Action::Pick(p) = &mut step.action {
+                *p = pick.clone();
+            }
+        }
+        Ok(copy)
+    }
+
+    /// Cut the part of step `id`'s map out instead of copying it by PCR, the reverse of
+    /// [`Protocol::copy_out`]. The PCR step goes, the cut works on the map again with the PCR's
+    /// part and tail enzymes, and the pick keeps the piece that holds the part. Returns the cut's
+    /// id.
+    pub fn cut_out(&mut self, id: &str) -> Result<String> {
+        let (open, cut) = self.lane_cut(id)?;
+        let Some(copy) = self.amplify_before(&cut).map(str::to_string) else {
+            return Err(Error::Invalid(format!("{cut} cuts {open} itself, not a PCR product")));
         };
-        let old = params.around.clone();
+        let Some(Action::Amplify(params)) = self.step(&copy).map(|s| s.action.clone()) else { unreachable!("amplify_before finds a PCR") };
+        self.steps.retain(|s| s.id != copy);
+        // The pick keeps the piece that holds the part, as a cut lane's does, or the piece the
+        // enzymes made when there is no part.
+        let enzymes = params.enzymes();
+        let mut pick = PickParams::default();
+        match &params.region {
+            Some(p) if is_range(p) => pick.holds = Some(p.clone()),
+            Some(p) => pick.contains = Some(p.clone()),
+            None => pick.ends = (1..=2).contains(&enzymes.len()).then(|| enzymes.join("/")),
+        }
+        for step in &mut self.steps {
+            if step.id == cut {
+                step.inputs = vec![open.clone()];
+                if let Action::Digest(d) = &mut step.action {
+                    d.around = params.region.clone();
+                    d.enzymes = enzymes.clone();
+                }
+                if step.note == TRIM_NOTE {
+                    step.note.clear();
+                }
+            }
+            let takes = step.inputs.iter().any(|r| split_reference(r).0 == cut);
+            if takes && let Action::Pick(p) = &mut step.action {
+                *p = pick.clone();
+            }
+        }
+        Ok(cut)
+    }
+
+    /// Keep these primers for PCR step `id`, each written 5' to 3' with its tail, or with
+    /// neither design them anew on each run. Kept primers are checked against the part on every
+    /// run.
+    pub fn set_primers(&mut self, id: &str, forward: Option<String>, reverse: Option<String>) -> Result<()> {
+        let clean = |text: Option<String>, which: &str| -> Result<Option<String>> {
+            let Some(text) = text else { return Ok(None) };
+            let bases: Vec<u8> = text.bytes().filter(|b| !b.is_ascii_whitespace()).map(|b| b.to_ascii_uppercase()).collect();
+            if bases.len() < 10 || bases.iter().any(|&b| !alphabet::is_unambiguous(b)) {
+                return Err(Error::Invalid(format!("the {which} primer must be at least 10 bases of A, C, G and T")));
+            }
+            Ok(Some(String::from_utf8_lossy(&bases).into_owned()))
+        };
+        let primers = match (clean(forward, "forward")?, clean(reverse, "reverse")?) {
+            (Some(f), Some(r)) => (Some(f), Some(r)),
+            (None, None) => (None, None),
+            _ => return Err(Error::Invalid("give both primers, or neither to design them anew".into())),
+        };
+        let step = self.steps.iter_mut().find(|s| s.id == id).ok_or_else(|| Error::Invalid(format!("no step is called {id}")))?;
+        let Action::Amplify(params) = &mut step.action else { return Err(Error::Invalid(format!("{id} is not a PCR"))) };
+        (params.forward_primer, params.reverse_primer) = primers;
+        Ok(())
+    }
+
+    /// Name the part digest `id` is about, or the part PCR step `id` copies: a feature's name or
+    /// a 1-based range, or none. The picks that kept the old part keep the new one. The cut that
+    /// trims a PCR product's tails passes the part on to the PCR.
+    pub fn set_part(&mut self, id: &str, part: Option<String>) -> Result<()> {
+        if let Some(copy) = self.amplify_before(id).map(str::to_string) {
+            return self.set_region(&copy, part);
+        }
+        let old = match self.step(id).map(|s| &s.action) {
+            Some(Action::Digest(params)) => params.around.clone(),
+            Some(Action::Amplify(_)) => return self.set_region(id, part),
+            _ => return Err(Error::Invalid(format!("{id} is neither a cut nor a PCR"))),
+        };
         for step in &mut self.steps {
             if step.id == id {
                 if let Action::Digest(params) = &mut step.action {
@@ -904,6 +1229,23 @@ pub struct CloningTemplate {
     pub insert_size: Option<usize>,
     /// Remove the backbone's 5' phosphates, so it cannot close on itself.
     pub dephosphorylate: bool,
+    /// Copy the insert out of the donor by PCR, with the enzymes' sites on the primers' tails,
+    /// rather than cutting it out.
+    pub pcr: bool,
+}
+
+/// The note on the cut that trims a PCR product's tails.
+const TRIM_NOTE: &str = "The cut trims the primers' tails, so the piece has sticky ends.";
+
+/// What the steps after a PCR look for. The digest of the product is about the part when it is a
+/// feature, which the product carries, and the pick keeps that feature's piece. A range names
+/// bases of the template, which lie elsewhere on the product, so the pick keeps the largest
+/// piece instead, which the piece between the tails always is.
+fn pcr_lane_criteria(part: Option<&str>) -> (Option<String>, PickParams) {
+    match part {
+        Some(part) if !is_range(part) => (Some(part.to_string()), PickParams { contains: Some(part.to_string()), ..PickParams::default() }),
+        _ => (None, PickParams { largest: true, ..PickParams::default() }),
+    }
 }
 
 /// A step with no note when `note` is empty.
@@ -1003,10 +1345,21 @@ impl Loader for Folder {
 pub enum Change {
     /// Start from another map, given as a path from the working folder: open it, cut it around
     /// `cut_out` with `enzymes` (none to choose later) and keep the piece that holds the part.
-    AddMap { map: PathBuf, cut_out: Option<String>, enzymes: Vec<String> },
+    /// With `pcr`, copy the part out by PCR instead, with the enzymes' sites on the primers.
+    AddMap { map: PathBuf, cut_out: Option<String>, enzymes: Vec<String>, pcr: bool },
     /// Change cut `step`: its part when `part` is given (`Some(None)` forgets it), and its enzymes
     /// when `enzymes` is given. A vector cut with the insert's enzymes takes new ones with it.
+    /// For a PCR step, the part is the one it copies and the enzymes go on its primers' tails.
     Cut { step: String, part: Option<Option<String>>, enzymes: Option<Vec<String>> },
+    /// Copy the part of step `step`'s map out by PCR instead of cutting it out, as
+    /// [`Protocol::copy_out`] does.
+    CopyOut { step: String },
+    /// Cut the part of step `step`'s map out instead of copying it by PCR, as
+    /// [`Protocol::cut_out`] does.
+    CutOut { step: String },
+    /// The primers of PCR step `step`: pair `pair` (from 1) of those a run designs, the two
+    /// given, or with none of the three a new design on each run.
+    Primers { step: String, pair: Option<usize>, forward: Option<String>, reverse: Option<String> },
     /// Make pick step `pick` keep piece `piece` (from 1) of its cut, as a click on that piece
     /// does in the app.
     Keep { pick: String, piece: usize },
@@ -1031,41 +1384,57 @@ impl Protocol {
     /// the maps are read from there when a change needs the pieces a run makes.
     pub fn make(&mut self, change: &Change, folder: &Folder, db: &EnzymeDb) -> Result<String> {
         match change {
-            Change::AddMap { map, cut_out, enzymes } => {
+            Change::AddMap { map, cut_out, enzymes, pcr } => {
                 // The map and its part are checked first, so a typo changes nothing.
                 let doc = crate::io::read_one(map)?;
                 if let Some(part) = cut_out {
                     locate(&doc, part)?;
                 }
                 let open = OpenParams { path: Some(stored_path(&folder.0, map)), document: None };
-                let kept = self.add_source(open, enzymes.clone(), cut_out.clone());
+                let kept =
+                    if *pcr { self.add_template(open, enzymes.clone(), cut_out.clone()) } else { self.add_source(open, enzymes.clone(), cut_out.clone()) };
                 let source = self.source_of(&kept).unwrap_or_default().to_string();
-                Ok(format!("added {} as {source}; {kept} keeps its piece", doc.name))
+                let how = if *pcr { ", copied out by PCR" } else { "" };
+                Ok(format!("added {} as {source}{how}; {kept} keeps its piece", doc.name))
             }
             Change::Cut { step, part, enzymes } => {
                 if part.is_none() && enzymes.is_none() {
                     return Err(Error::Invalid("say what to change: the part, the enzymes or both".into()));
                 }
                 let mut said = Vec::new();
+                let copies = matches!(self.step(step).map(|s| &s.action), Some(Action::Amplify(_)));
                 if let Some(part) = part {
                     self.set_part(step, part.clone())?;
-                    said.push(match part {
-                        Some(part) => format!("{step} is about {part}"),
-                        None => format!("{step} has no part"),
+                    said.push(match (part, copies) {
+                        (Some(part), true) => format!("{step} copies {part}"),
+                        (Some(part), false) => format!("{step} is about {part}"),
+                        (None, _) => format!("{step} has no part"),
                     });
                 }
                 if let Some(enzymes) = enzymes {
-                    // The cuts that change along with this one are named too, so nothing changes
-                    // unsaid.
+                    // The cuts and PCRs that change along with this one are named too, so nothing
+                    // changes unsaid.
                     let digests = |p: &Protocol| -> Vec<(String, Vec<String>)> {
-                        p.steps.iter().filter_map(|s| if let Action::Digest(d) = &s.action { Some((s.id.clone(), d.enzymes.clone())) } else { None }).collect()
+                        p.steps
+                            .iter()
+                            .filter_map(|s| match &s.action {
+                                Action::Digest(d) => Some((s.id.clone(), d.enzymes.clone())),
+                                Action::Amplify(a) => Some((s.id.clone(), a.enzymes())),
+                                _ => None,
+                            })
+                            .collect()
                     };
                     let before = digests(self);
                     let follow = part_role(self, step) == Some(PartRole::Keep);
                     self.set_enzymes(step, enzymes.clone(), follow)?;
                     let followers: Vec<String> =
                         digests(self).into_iter().zip(before).filter(|((id, now), (_, was))| id != step && now != was).map(|((id, _), _)| id).collect();
-                    let mut text = if enzymes.is_empty() { format!("{step} has no enzymes") } else { format!("{step} cuts with {}", and_list(enzymes)) };
+                    let mut text = match (enzymes.is_empty(), copies) {
+                        (true, true) => format!("{step} has no tails"),
+                        (true, false) => format!("{step} has no enzymes"),
+                        (false, true) => format!("{step} puts {} on its primers", and_list(enzymes)),
+                        (false, false) => format!("{step} cuts with {}", and_list(enzymes)),
+                    };
                     if !followers.is_empty() {
                         let verb = if followers.len() == 1 { "follows" } else { "follow" };
                         text.push_str(&format!("; {} {verb} it", and_list(&followers)));
@@ -1113,6 +1482,40 @@ impl Protocol {
                 self.set_orientation(join, index, *way)?;
                 Ok(format!("{piece} goes into {join} {}", way.words()))
             }
+            Change::CopyOut { step } => {
+                let (open, cut) = self.lane_cut(step)?;
+                let copy = self.copy_out(step)?;
+                Ok(format!("{copy} copies the part out of {open} by PCR, and {cut} trims its tails"))
+            }
+            Change::CutOut { step } => {
+                let (open, _) = self.lane_cut(step)?;
+                let cut = self.cut_out(step)?;
+                Ok(format!("{cut} cuts the part out of {open} again, without a PCR"))
+            }
+            Change::Primers { step, pair, forward, reverse } => match (pair, forward, reverse) {
+                (Some(pair), None, None) => {
+                    // The pairs are those a run designs once no pair is kept.
+                    let mut trial = self.clone();
+                    trial.set_primers(step, None, None)?;
+                    let ran = run(&trial, folder, db);
+                    let pairs = ran.step(step).map(|r| r.findings.primer_pairs.clone()).unwrap_or_default();
+                    let chosen = pairs.get(pair.wrapping_sub(1)).ok_or_else(|| match pairs.len() {
+                        0 => Error::Invalid(format!("{step} designed no primers; see `protocol run` for why")),
+                        n => Error::Invalid(format!("{step} designed pairs 1 to {n}, so there is no pair {pair}")),
+                    })?;
+                    self.set_primers(step, Some(chosen.forward.clone()), Some(chosen.reverse.clone()))?;
+                    Ok(format!("{step} keeps primer pair {pair}: {} and {}", chosen.forward, chosen.reverse))
+                }
+                (None, Some(forward), Some(reverse)) => {
+                    self.set_primers(step, Some(forward.clone()), Some(reverse.clone()))?;
+                    Ok(format!("{step} uses the primers given"))
+                }
+                (None, None, None) => {
+                    self.set_primers(step, None, None)?;
+                    Ok(format!("{step} designs its primers anew"))
+                }
+                _ => Err(Error::Invalid("give a pair number, both primers, or neither to design them anew".into())),
+            },
         }
     }
 }
@@ -1147,6 +1550,8 @@ pub struct NewFile {
     /// The protocol's name. Without one it is named for the part and the vector.
     pub name: Option<String>,
     pub dephosphorylate: bool,
+    /// Copy the insert out by PCR, with the enzymes' sites on the primers, rather than cut it out.
+    pub pcr: bool,
 }
 
 /// Write a new restriction-cloning protocol file at `path` (see
@@ -1175,6 +1580,7 @@ pub fn write_new(path: &Path, new: &NewFile, force: bool, db: &EnzymeDb) -> Resu
         insert: new.cut_out.clone(),
         replace: new.replace.clone(),
         dephosphorylate: new.dephosphorylate,
+        pcr: new.pcr,
         ..CloningTemplate::default()
     });
     crate::io::write_atomic(path, protocol.to_json().as_bytes())?;
@@ -1259,7 +1665,7 @@ impl Piece {
             return format!("{} bp circular", thousands(self.doc.len()));
         }
         let name = |e: &Option<String>| e.clone().unwrap_or_else(|| "end".into());
-        let phosphate = if self.dephosphorylated() { ", dephosphorylated" } else { "" };
+        let phosphate = if self.dephosphorylated() { ", no 5' phosphates" } else { "" };
         format!("{} bp, {}/{}{phosphate}", thousands(self.doc.len()), name(&self.left_enzyme), name(&self.right_enzyme))
     }
 
@@ -1464,6 +1870,24 @@ impl Junction {
     }
 }
 
+/// A primer pair a PCR designed, as a person would order it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PrimerChoice {
+    /// The primers 5' to 3', tails included.
+    pub forward: String,
+    pub reverse: String,
+    /// The melting temperature of each primer's annealing part.
+    pub forward_tm: f64,
+    pub reverse_tm: f64,
+    /// How many bases of each primer anneal to the template.
+    pub forward_anneals: usize,
+    pub reverse_anneals: usize,
+    /// The product's length, tails included.
+    pub product_len: usize,
+    /// What a person should know about the pair, in a few words each.
+    pub warnings: Vec<String>,
+}
+
 /// What a step found, for showing it.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Findings {
@@ -1485,6 +1909,13 @@ pub struct Findings {
     pub parts: Vec<Span>,
     /// For a ligation, the other molecules its tube makes besides the product or the options.
     pub byproducts: Vec<Byproduct>,
+    /// A PCR's primers, each with where it anneals on the template.
+    pub primers: Vec<Primer>,
+    /// The tails on a PCR's product, in bases at its left and right ends: the primers' bases
+    /// before the parts that anneal.
+    pub tails: [usize; 2],
+    /// The primer pairs a PCR designed, best first and the first in use, while no pair is kept.
+    pub primer_pairs: Vec<PrimerChoice>,
 }
 
 /// The run of one step.
@@ -1634,6 +2065,7 @@ fn run_action(step: &Step, groups: Vec<Vec<Piece>>, result: &mut StepRun, loader
     let outcome = match &step.action {
         Action::Open(params) => open(params, loader, result),
         Action::Digest(params) => single(step, &groups).and_then(|m| run_digest(&m, params, db, result)),
+        Action::Amplify(params) => single(step, &groups).and_then(|m| run_amplify(&m, params, &step.id, db, result)),
         Action::Pick(params) => pick(&groups.concat(), params, result),
         Action::Dephosphorylate(_) => single(step, &groups).and_then(|m| dephosphorylate(&m, &label, result)),
         Action::Flip(_) => single(step, &groups).map(|m| {
@@ -1735,6 +2167,122 @@ fn run_digest(input: &Piece, params: &DigestParams, db: &EnzymeDb, result: &mut 
             None => result.notes.push(format!("no fragment holds all of {part}")),
         }
     }
+    Ok(())
+}
+
+/// An `amplify` step: the part copied by PCR, with the tails' sites at the product's ends. The
+/// primers are the pair kept in the step, or else the best pair designed for the part, with the
+/// other pairs listed so one of them can be kept instead. A step without a part waits for it.
+fn run_amplify(input: &Piece, params: &AmplifyParams, step_id: &str, db: &EnzymeDb, result: &mut StepRun) -> std::result::Result<(), Issue> {
+    let template = &input.doc;
+    if !template.molecule.is_nucleic() {
+        return Err(Issue::new("amplify.not_dna", format!("{} is not DNA, so it cannot be a PCR template", template.name)));
+    }
+    let len = template.len();
+    // The part, found on the template before anything else. Without one the step waits.
+    let Some(part) = params.region.as_deref() else {
+        result.status = Status::NeedsChoice;
+        result.notes.push("mark the part to copy".into());
+        return Ok(());
+    };
+    let region =
+        locate(template, part).map_err(|e| Issue::new("amplify.no_part", e.to_string()).fix("name a feature of the map, or a range such as 389..1108"))?;
+    result.findings.region = Some(region);
+    // The tails: each enzyme's site with spare bases before it, so the enzyme can cut near the
+    // end of the product. An enzyme that also cuts inside the part would cut the product there.
+    let bases = region.extract(&template.seq);
+    let mut tails: [Vec<u8>; 2] = [Vec::new(), Vec::new()];
+    for (ii, name) in [&params.forward_enzyme, &params.reverse_enzyme].into_iter().enumerate() {
+        let Some(name) = name else { continue };
+        let found = db.resolve(&[name]).map_err(|e| Issue::new("amplify.unknown_enzyme", e.to_string()))?;
+        let Some(enzyme) = found.into_iter().next() else { continue };
+        tails[ii] = site_tail(enzyme, SITE_PADDING.len());
+        if !find_sites(&bases, false, &[enzyme]).is_empty() {
+            result.warnings.push(
+                Issue::new("amplify.cuts_part", format!("{} cuts inside {part}, so cutting the product would split {part}", enzyme.name))
+                    .fix("put another enzyme's site on that primer"),
+            );
+        }
+    }
+    // The primers: the pair kept, or the best of a new design, named for the part.
+    let stem: String = if is_range(part) { step_id.to_string() } else { part.replace(' ', "_") };
+    let (forward, reverse) = match (&params.forward_primer, &params.reverse_primer) {
+        (Some(f), Some(r)) => (f.clone(), r.clone()),
+        _ => {
+            let options = DesignOptions { forward_tail: tails[0].clone(), reverse_tail: tails[1].clone(), count: 5, ..DesignOptions::default() };
+            let pairs = design_pairs(template, region, &options)
+                .map_err(|e| Issue::new("amplify.no_primers", e.to_string()).fix("mark a longer part, or one whose ends hold no ambiguous bases"))?;
+            result.findings.primer_pairs = pairs
+                .iter()
+                .map(|p| PrimerChoice {
+                    forward: p.forward.text(),
+                    reverse: p.reverse.text(),
+                    forward_tm: p.forward.tm,
+                    reverse_tm: p.reverse.tm,
+                    forward_anneals: p.forward.annealing().len(),
+                    reverse_anneals: p.reverse.annealing().len(),
+                    product_len: p.product_len,
+                    warnings: p.warnings.iter().chain(&p.forward.warnings).chain(&p.reverse.warnings).cloned().collect(),
+                })
+                .collect();
+            (pairs[0].forward.text(), pairs[0].reverse.text())
+        }
+    };
+    let (forward, reverse) = (Primer::new(format!("{stem}_F"), forward), Primer::new(format!("{stem}_R"), reverse));
+    // The product, as the polymerase makes it: the primers' own bases at its ends, and no 5'
+    // phosphates, since primers are made without them.
+    let made = pcr::pcr(template, &forward, &reverse, &BindingRules::default())
+        .map_err(|e| Issue::new("amplify.no_product", e.to_string()).fix("design the primers anew, or check them against the part"))?;
+    if !made.template_span.contains_span(&region, len) {
+        let (a, b) = made.template_span.to_1based(len);
+        let message = format!("the primers copy bases {a}..{b}, which do not hold all of {part}");
+        return Err(Issue::new("amplify.stale", message).fix("design the primers anew for the part"));
+    }
+    if made.alternatives > 0 {
+        let n = made.alternatives;
+        result.warnings.push(
+            Issue::new("amplify.other_products", format!("the primers can also make {n} other product{}", if n == 1 { "" } else { "s" }))
+                .fix("design the primers anew, or keep a pair that anneals nowhere else"),
+        );
+    }
+    let mut product = made.doc;
+    product.name = format!("{part} PCR product");
+    product.ends.left_modification = Some(UNMODIFIED.into());
+    product.ends.right_modification = Some(UNMODIFIED.into());
+    // The tails on the product: the tails designed, which a designed primer starts with, or for
+    // primers given by hand the bases before the part that anneals, as far as that can be told
+    // (a tail base that happens to match the template counts as annealing there).
+    let tail_of = |primer: &Primer, designed: &[u8], site: &crate::primers::Binding| -> usize {
+        if !designed.is_empty() && primer.seq.as_bytes().starts_with(designed) { designed.len() } else { primer.seq.len().saturating_sub(site.annealed) }
+    };
+    let made_tails = [tail_of(&forward, &tails[0], &made.forward_site), tail_of(&reverse, &tails[1], &made.reverse_site)];
+    // Each primer with where it anneals on the template, for the picture and the report.
+    let described = |primer: &Primer, site: &crate::primers::Binding, tail: usize| -> Primer {
+        let mut p = primer.clone();
+        let tail = if tail > 0 { format!(", {tail}-nt 5' tail") } else { String::new() };
+        p.description = format!("anneals {} nt, Tm {:.1} C{tail}", site.annealed, site.tm);
+        p.sites = vec![BindingSite { span: site.span, strand: site.strand, tm: Some(site.tm), extra: XmlExtra::default() }];
+        p
+    };
+    let primers = vec![described(&forward, &made.forward_site, made_tails[0]), described(&reverse, &made.reverse_site, made_tails[1])];
+    result.findings.tails = made_tails;
+    // The product's own copies of the primers say the same.
+    for copy in &mut product.primers {
+        if let Some(p) = primers.iter().find(|p| p.name == copy.name) {
+            copy.description = p.description.clone();
+        }
+    }
+    for p in &primers {
+        result.notes.push(format!("{}: {} ({})", p.name, p.seq, p.description));
+    }
+    match result.findings.primer_pairs.len() {
+        0 => {}
+        1 => result.notes.push("the primers are designed anew on each run until a pair is kept".into()),
+        n => result.notes.push(format!("the best of {n} pairs designed; the primers are designed anew on each run until a pair is kept")),
+    }
+    result.notes.push(format!("product {} bp, no 5' phosphates", thousands(product.len())));
+    result.findings.primers = primers;
+    result.outputs = vec![Piece::plain(product)];
     Ok(())
 }
 
@@ -1871,7 +2419,12 @@ fn junction_problem(left: &Piece, right: &Piece, left_label: &str, right_label: 
     }
     if !Piece::phosphorylated(&left.doc.ends.right_modification) && !Piece::phosphorylated(&right.doc.ends.left_modification) {
         let message = format!("neither end of the {left_label} / {right_label} junction has a 5' phosphate, so ligase cannot join them");
-        return Some(Issue::new("ends.no_phosphate", message).fix("dephosphorylate only one of the two molecules, usually the vector"));
+        let mut issue = Issue::new("ends.no_phosphate", message).fix("dephosphorylate only one of the two molecules, usually the vector");
+        // An end no enzyme made may be a PCR product's, which never had a phosphate.
+        if left.right_enzyme.is_none() || right.left_enzyme.is_none() {
+            issue = issue.fix("a PCR product has no 5' phosphates unless its primers were ordered phosphorylated");
+        }
+        return Some(issue);
     }
     None
 }
@@ -2169,7 +2722,13 @@ pub enum PartRole {
 /// The role of the part of digest `id`, from the picks that take its pieces. `None` when the
 /// digest names no part or nothing picks from it.
 pub fn part_role(protocol: &Protocol, id: &str) -> Option<PartRole> {
-    let Action::Digest(params) = &protocol.step(id)?.action else { return None };
+    // A PCR copies its part to keep it, and the cut of its product frees the copy.
+    let params = match &protocol.step(id)?.action {
+        Action::Amplify(_) => return Some(PartRole::Keep),
+        Action::Digest(_) if protocol.amplify_before(id).is_some() => return Some(PartRole::Keep),
+        Action::Digest(params) => params,
+        _ => return None,
+    };
     let part = params.around.as_deref()?;
     let picks: Vec<&PickParams> = protocol
         .steps
@@ -2290,6 +2849,43 @@ pub fn story(protocol: &Protocol, run: &Run, index: usize) -> Story {
                 }
             }
         }
+        Action::Amplify(params) => match params.region.as_deref() {
+            None => {
+                story.headline = format!("Copy a part of {input} by PCR: mark the part");
+                story.details.push("Drag across the map or click a feature to mark the part to copy. Primers are then designed for it.".into());
+            }
+            Some(part) => {
+                story.headline = format!("Copy {part} out of {input} by PCR");
+                let ends = match (params.forward_enzyme.as_deref(), params.reverse_enzyme.as_deref()) {
+                    (None, None) => "They carry no enzyme site, so the product has blunt ends.".to_string(),
+                    (Some(f), Some(r)) if f.eq_ignore_ascii_case(r) => {
+                        format!("Each carries the {f} site on its 5' tail, so the product can be cut to fit the vector.")
+                    }
+                    (Some(f), Some(r)) => {
+                        format!(
+                            "The forward primer's 5' tail holds the {f} site and the reverse primer's the {r} site, so the product can be cut to fit the vector."
+                        )
+                    }
+                    (Some(f), None) => format!("The forward primer's 5' tail holds the {f} site, and the reverse primer has no tail."),
+                    (None, Some(r)) => format!("The reverse primer's 5' tail holds the {r} site, and the forward primer has no tail."),
+                };
+                story.details.push(format!("The primers anneal at the two ends of {part} and copy it. {ends}"));
+                if let Some(r) = result.filter(|_| status == Some(Status::Done)) {
+                    for p in &r.findings.primers {
+                        story.details.push(format!("{}: {} ({}).", p.name, p.seq, p.description));
+                    }
+                    if let Some(product) = r.outputs.first() {
+                        story.details.push(format!("The product is {} bp and carries no 5' phosphates.", thousands(product.doc.len())));
+                    }
+                    if !params.pinned() {
+                        story.details.push(match r.findings.primer_pairs.len() {
+                            n if n > 1 => format!("These are the best of {n} pairs designed. Keep a pair to fix the primers before ordering them."),
+                            _ => "Keep the primers to fix them before ordering them.".to_string(),
+                        });
+                    }
+                }
+            }
+        },
         Action::Pick(params) => {
             let size = |p: &Piece| thousands(p.doc.len());
             // What is kept, by the criterion that says most about it, and the role its id names.
@@ -2387,7 +2983,7 @@ fn byproduct_story(result: &StepRun, names: &[String]) -> Vec<String> {
 pub fn summary(protocol: &Protocol, run: &Run) -> String {
     let mut sentences: Vec<String> = Vec::new();
     for (ii, step) in protocol.steps.iter().enumerate() {
-        if matches!(step.action, Action::Digest(_) | Action::Ligate(_)) {
+        if matches!(step.action, Action::Digest(_) | Action::Amplify(_) | Action::Ligate(_)) {
             sentences.push(story(protocol, run, ii).headline);
         }
     }
@@ -2495,6 +3091,26 @@ impl Run {
                 }
                 if let Some(picked) = r.findings.picked {
                     value["picked"] = json!(picked + 1);
+                }
+                // A PCR's primers, with where they anneal on the template, and the pairs it
+                // designed, best first.
+                if !r.findings.primers.is_empty() {
+                    let len = r.inputs.first().map_or(0, |p| p.doc.len());
+                    value["primers"] = json!(r.findings.primers.iter().map(|p| json::primer_to_value(p, len)).collect::<Vec<_>>());
+                }
+                if !r.findings.primer_pairs.is_empty() {
+                    let tenth = |t: f64| (t * 10.0).round() / 10.0;
+                    value["primer_pairs"] = json!(r
+                        .findings
+                        .primer_pairs
+                        .iter()
+                        .enumerate()
+                        .map(|(ii, p)| {
+                            json!({ "pair": ii + 1, "forward": p.forward, "reverse": p.reverse, "forward_tm": tenth(p.forward_tm),
+                                "reverse_tm": tenth(p.reverse_tm), "forward_anneals": p.forward_anneals, "reverse_anneals": p.reverse_anneals,
+                                "product_length": p.product_len, "warnings": p.warnings })
+                        })
+                        .collect::<Vec<_>>());
                 }
                 if !r.findings.junctions.is_empty() {
                     value["junctions"] = json!(r.findings.junctions.iter().map(junction_json).collect::<Vec<_>>());
@@ -3228,7 +3844,7 @@ mod tests {
         assert_eq!(again.step(&join).unwrap().status, ran.step(&join).unwrap().status);
         // A map added by path is stored relative to the protocol's folder, and the changes the
         // command line names say what they did.
-        let add = Change::AddMap { map: folder.join("donor.gb"), cut_out: Some("geneX".into()), enzymes: names(&["EcoRI", "BamHI"]) };
+        let add = Change::AddMap { map: folder.join("donor.gb"), cut_out: Some("geneX".into()), enzymes: names(&["EcoRI", "BamHI"]), pcr: false };
         let (changed, _, said) = change_file(&path, EnzymeDb::builtin(), &add).unwrap();
         assert_eq!(said, "added donor as donor_2; insert_2 keeps its piece");
         let Some(Action::Open(opened)) = changed.step("donor_2").map(|s| &s.action) else { panic!("donor_2 opens a map") };
@@ -3329,5 +3945,337 @@ mod tests {
         let protocol = Protocol::restriction_cloning(&replaced);
         assert_eq!(part_role(&protocol, "cut_donor"), Some(PartRole::Keep));
         assert_eq!(part_role(&protocol, "cut_vector"), Some(PartRole::Replace));
+    }
+
+    /// The cloning with geneX copied out of the donor by PCR, with EcoRI and BglII sites on the
+    /// primers' tails, into the vector opened with the same two enzymes.
+    fn pcr_template() -> CloningTemplate {
+        CloningTemplate { pcr: true, insert_enzymes: names(&["EcoRI", "BglII"]), vector_enzymes: Vec::new(), ..template() }
+    }
+
+    /// The enzymes of a cut, or the tail enzymes of a PCR.
+    fn enzymes_of(protocol: &Protocol, id: &str) -> Vec<String> {
+        match &protocol.step(id).unwrap().action {
+            Action::Digest(d) => d.enzymes.clone(),
+            Action::Amplify(a) => a.enzymes(),
+            _ => Vec::new(),
+        }
+    }
+
+    fn amplify_params(protocol: &Protocol, id: &str) -> AmplifyParams {
+        match &protocol.step(id).unwrap().action {
+            Action::Amplify(a) => a.clone(),
+            other => panic!("{id} is not a PCR: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_pcr_copies_the_part_out_and_the_product_goes_into_the_vector() {
+        let protocol = Protocol::restriction_cloning(&pcr_template());
+        assert_eq!(ids(&protocol), vec!["vector", "cut_vector", "backbone", "cip", "donor", "pcr_donor", "cut_pcr", "insert", "product"]);
+        let ran = run(&protocol, &maps(), EnzymeDb::builtin());
+        for step in &ran.steps {
+            assert_eq!(step.status, Status::Done, "{}: {:?}", step.id, step.error);
+        }
+        // The primers anneal at the ends of geneX and carry the tails: six spare bases and the
+        // site. The product holds geneX and, like any PCR product, no 5' phosphates.
+        let copy = ran.step("pcr_donor").unwrap();
+        assert_eq!(copy.findings.region, Some(Span::new(300, 600)));
+        assert_eq!(copy.findings.primers.len(), 2);
+        assert_eq!(copy.findings.primers[0].name, "geneX_F");
+        assert!(copy.findings.primers[0].seq.starts_with("TAAGCAGAATTC"), "{}", copy.findings.primers[0].seq);
+        assert!(copy.findings.primers[1].seq.starts_with("TAAGCAAGATCT"), "{}", copy.findings.primers[1].seq);
+        assert_eq!(copy.findings.primers[0].sites[0].span.start, 300);
+        assert_eq!(copy.findings.tails, [12, 12]);
+        assert!(copy.findings.primers[0].description.ends_with("12-nt 5' tail"), "{}", copy.findings.primers[0].description);
+        let product = &copy.outputs[0];
+        assert_eq!(product.doc.len(), 300 + 24);
+        assert_eq!(product.doc.name, "geneX PCR product");
+        assert!(product.dephosphorylated());
+        assert!(product.doc.features.iter().any(|f| f.name == "geneX"));
+        assert_eq!(product.doc.primers.len(), 2, "the product carries its primers");
+        assert!(copy.findings.primer_pairs.len() > 1, "other pairs are offered");
+        assert!(copy.warnings.is_empty(), "{:?}", copy.warnings);
+        // The cut trims the tails off. The geneX piece has an EcoRI end and a BglII end, both
+        // with phosphates, and the pick keeps it. The tail scraps keep the product's bare ends.
+        let pieces = &ran.step("cut_pcr").unwrap().outputs;
+        assert_eq!(pieces.len(), 3);
+        assert!(!Piece::phosphorylated(&pieces[0].doc.ends.left_modification) && Piece::phosphorylated(&pieces[0].doc.ends.right_modification));
+        let insert = &ran.step("insert").unwrap().outputs[0];
+        assert_eq!((insert.left_enzyme.as_deref(), insert.right_enzyme.as_deref()), (Some("EcoRI"), Some("BglII")));
+        assert!(!insert.dephosphorylated(), "the cut ends carry phosphates");
+        // The product closes with both sites back, and geneX in it.
+        let made = ran.step("product").unwrap();
+        assert!(made.outputs[0].doc.features.iter().any(|f| f.name == "geneX"));
+        let regenerated: Vec<&str> = made.findings.junctions.iter().flat_map(|j| j.regenerated.iter().map(String::as_str)).collect();
+        assert!(regenerated.contains(&"EcoRI") && regenerated.contains(&"BglII"), "{regenerated:?}");
+        // The story, the summary and the JSON say what the PCR does.
+        assert_eq!(story(&protocol, &ran, 5).headline, "Copy geneX out of donor by PCR");
+        let told = story(&protocol, &ran, 5).details;
+        assert!(
+            told[0].ends_with(
+                "The forward primer's 5' tail holds the EcoRI site and the reverse primer's the BglII site, so the product can be cut to fit the vector."
+            ),
+            "{told:?}"
+        );
+        assert!(told.iter().any(|t| t.starts_with("geneX_F: TAAGCAGAATTC")), "{told:?}");
+        assert!(told.iter().any(|t| t.ends_with("Keep a pair to fix the primers before ordering them.")), "{told:?}");
+        assert_eq!(story(&protocol, &ran, 6).headline, "Cut geneX PCR product with EcoRI and BglII");
+        assert_eq!(story(&protocol, &ran, 7).headline, "Keep the geneX piece as the insert (310 bp)");
+        assert!(
+            summary(&protocol, &ran).contains("Copy geneX out of donor by PCR. Cut geneX PCR product with EcoRI and BglII."),
+            "{}",
+            summary(&protocol, &ran)
+        );
+        let value = ran.to_json(&protocol);
+        assert_eq!(value["steps"][5]["type"], "amplify");
+        assert_eq!(value["steps"][5]["primers"][0]["name"], "geneX_F");
+        assert_eq!(value["steps"][5]["primers"][0]["sites"][0]["start"], 301);
+        assert_eq!(value["steps"][5]["primer_pairs"][0]["pair"], 1);
+        assert_eq!(value["steps"][5]["part"]["start"], 301);
+        assert!(ran.text(&protocol).contains("geneX_F: TAAGCAGAATTC"), "{}", ran.text(&protocol));
+    }
+
+    #[test]
+    fn a_pcr_step_reads_back_the_same() {
+        let text = r#"{"steps": [{"id": "t", "type": "open", "params": {"path": "donor.dna"}},
+            {"id": "copy", "in": ["t"], "type": "amplify", "params": {"region": "geneX", "forward_enzyme": "EcoRI", "reverse_enzyme": "BamHI"}}]}"#;
+        let read = Protocol::from_json(text).unwrap();
+        let expected = AmplifyParams {
+            region: Some("geneX".into()),
+            forward_enzyme: Some("EcoRI".into()),
+            reverse_enzyme: Some("BamHI".into()),
+            ..AmplifyParams::default()
+        };
+        assert_eq!(read.steps[1].action, Action::Amplify(expected));
+        assert_eq!(Protocol::from_json(&read.to_json()).unwrap(), read);
+        assert_eq!(Action::blank("amplify").map(|a| a.title()), Some("Copy"));
+    }
+
+    #[test]
+    fn a_pcr_without_a_part_waits_and_the_part_can_be_named_on_any_step_of_its_lane() {
+        let mut no_part = pcr_template();
+        no_part.insert = None;
+        let mut protocol = Protocol::restriction_cloning(&no_part);
+        let ran = run(&protocol, &maps(), EnzymeDb::builtin());
+        let copy = ran.step("pcr_donor").unwrap();
+        assert_eq!(copy.status, Status::NeedsChoice);
+        assert!(copy.choices.is_empty());
+        assert_eq!(story(&protocol, &ran, 5).headline, "Copy a part of donor by PCR: mark the part");
+        assert_eq!(ran.step("cut_pcr").unwrap().status, Status::Skipped);
+        // A range as the part: the pick keeps the largest piece, since the range names bases of
+        // the template, and the primers are named for the step.
+        protocol.set_part("cut_pcr", Some("301..600".into())).unwrap();
+        assert_eq!(amplify_params(&protocol, "pcr_donor").region.as_deref(), Some("301..600"));
+        let Action::Pick(pick) = &protocol.step("insert").unwrap().action else { panic!("insert is a pick") };
+        assert!(pick.largest && pick.contains.is_none());
+        let ran = run(&protocol, &maps(), EnzymeDb::builtin());
+        assert_eq!(ran.step("product").unwrap().status, Status::Done, "{:?}", ran.step("product").unwrap().error);
+        assert_eq!(ran.step("pcr_donor").unwrap().findings.primers[0].name, "pcr_donor_F");
+        // A feature as the part: the cut of the product is about it, and the pick keeps its piece.
+        protocol.set_part("pcr_donor", Some("geneX".into())).unwrap();
+        let Action::Digest(cut) = &protocol.step("cut_pcr").unwrap().action else { panic!("cut_pcr is a cut") };
+        assert_eq!(cut.around.as_deref(), Some("geneX"));
+        let Action::Pick(pick) = &protocol.step("insert").unwrap().action else { panic!("insert is a pick") };
+        assert_eq!(pick.contains.as_deref(), Some("geneX"));
+        assert_eq!(part_role(&protocol, "pcr_donor"), Some(PartRole::Keep));
+        assert_eq!(part_role(&protocol, "cut_pcr"), Some(PartRole::Keep));
+        // A part the map lacks is a problem of its own.
+        protocol.set_part("pcr_donor", Some("geneY".into())).unwrap();
+        assert_eq!(problem(&run(&protocol, &maps(), EnzymeDb::builtin()), "pcr_donor"), Some("amplify.no_part"));
+    }
+
+    #[test]
+    fn kept_primers_are_used_as_given_and_checked_against_the_part() {
+        let db = EnzymeDb::builtin();
+        let mut protocol = Protocol::restriction_cloning(&pcr_template());
+        let first = run(&protocol, &maps(), db);
+        let pairs = first.step("pcr_donor").unwrap().findings.primer_pairs.clone();
+        assert!(pairs.len() >= 2, "{}", pairs.len());
+        // Keeping the second pair writes it into the step, and the run then designs nothing.
+        protocol.set_primers("pcr_donor", Some(pairs[1].forward.clone()), Some(pairs[1].reverse.clone())).unwrap();
+        assert!(amplify_params(&protocol, "pcr_donor").pinned());
+        let second = run(&protocol, &maps(), db);
+        let copy = second.step("pcr_donor").unwrap();
+        assert_eq!(copy.status, Status::Done, "{:?}", copy.error);
+        assert!(copy.findings.primer_pairs.is_empty());
+        assert_eq!(copy.findings.primers[0].seq, pairs[1].forward);
+        assert_eq!(copy.outputs[0].doc.len(), pairs[1].product_len);
+        assert!(!story(&protocol, &second, 5).details.iter().any(|t| t.contains("Keep a pair")), "{:?}", story(&protocol, &second, 5).details);
+        // A new part or new tails let the primers go.
+        protocol.set_part("pcr_donor", Some("350..600".into())).unwrap();
+        assert!(!amplify_params(&protocol, "pcr_donor").pinned());
+        protocol.set_primers("pcr_donor", Some(pairs[1].forward.clone()), Some(pairs[1].reverse.clone())).unwrap();
+        protocol.set_enzymes("pcr_donor", names(&["EcoRI", "BamHI"]), true).unwrap();
+        assert!(!amplify_params(&protocol, "pcr_donor").pinned());
+        // Kept primers that no longer cover the part are caught, and primers that bind nowhere
+        // make no product.
+        let set = |protocol: &mut Protocol, change: &dyn Fn(&mut AmplifyParams)| {
+            if let Some(Action::Amplify(params)) = protocol.steps.iter_mut().find(|s| s.id == "pcr_donor").map(|s| &mut s.action) {
+                change(params);
+            }
+        };
+        set(&mut protocol, &|p| {
+            p.region = Some("250..650".into());
+            p.forward_primer = Some(pairs[1].forward.clone());
+            p.reverse_primer = Some(pairs[1].reverse.clone());
+        });
+        assert_eq!(problem(&run(&protocol, &maps(), db), "pcr_donor"), Some("amplify.stale"));
+        set(&mut protocol, &|p| p.forward_primer = Some("GGGGGGGGGGGGGGGGGGGG".into()));
+        assert_eq!(problem(&run(&protocol, &maps(), db), "pcr_donor"), Some("amplify.no_product"));
+        // Bad primers are refused before anything changes, and only a PCR has primers.
+        assert!(protocol.set_primers("pcr_donor", Some("ACGT".into()), Some("ACGTACGTACGT".into())).is_err());
+        assert!(protocol.set_primers("pcr_donor", Some("ACGTACGTACGT".into()), None).is_err());
+        assert!(protocol.set_primers("cut_pcr", None, None).is_err());
+        protocol.set_primers("pcr_donor", None, None).unwrap();
+        assert!(!amplify_params(&protocol, "pcr_donor").pinned());
+    }
+
+    #[test]
+    fn a_tail_enzyme_that_cuts_inside_the_part_is_a_warning() {
+        let mut memory = maps();
+        // A KpnI site in the middle of geneX.
+        memory.0.get_mut("donor.dna").unwrap().seq[450..456].copy_from_slice(b"GGTACC");
+        let mut protocol = Protocol::restriction_cloning(&pcr_template());
+        protocol.set_enzymes("pcr_donor", names(&["KpnI", "BglII"]), true).unwrap();
+        let ran = run(&protocol, &memory, EnzymeDb::builtin());
+        let copy = ran.step("pcr_donor").unwrap();
+        assert_eq!(copy.status, Status::Done, "{:?}", copy.error);
+        let warning = copy.warnings.iter().find(|w| w.code == "amplify.cuts_part").expect("KpnI cuts geneX");
+        assert!(warning.message.starts_with("KpnI cuts inside geneX"), "{}", warning.message);
+        // An unknown enzyme stops the step.
+        protocol.set_enzymes("pcr_donor", names(&["Nonsense"]), false).unwrap();
+        assert_eq!(problem(&run(&protocol, &memory, EnzymeDb::builtin()), "pcr_donor"), Some("amplify.unknown_enzyme"));
+    }
+
+    #[test]
+    fn tails_follow_the_vector_and_lead_it() {
+        let mut protocol = Protocol::restriction_cloning(&pcr_template());
+        // The vector's new enzymes go onto the tails, since a tail can carry any site, and onto
+        // the cut that trims the tails.
+        protocol.set_enzymes("cut_vector", names(&["EcoRI", "BamHI"]), false).unwrap();
+        assert_eq!(enzymes_of(&protocol, "pcr_donor"), names(&["EcoRI", "BamHI"]));
+        assert_eq!(enzymes_of(&protocol, "cut_pcr"), names(&["EcoRI", "BamHI"]));
+        // New tails lead the vector, as an insert's cut does, and the PCR's own cut comes along.
+        protocol.set_enzymes("pcr_donor", names(&["EcoRI", "BglII"]), true).unwrap();
+        assert_eq!(enzymes_of(&protocol, "cut_vector"), names(&["EcoRI", "BglII"]));
+        assert_eq!(enzymes_of(&protocol, "cut_pcr"), names(&["EcoRI", "BglII"]));
+        // Naming the cut that trims the tails changes the PCR too. One enzyme goes on both tails.
+        protocol.set_enzymes("cut_pcr", names(&["EcoRI"]), true).unwrap();
+        let params = amplify_params(&protocol, "pcr_donor");
+        assert_eq!((params.forward_enzyme.as_deref(), params.reverse_enzyme.as_deref()), (Some("EcoRI"), Some("EcoRI")));
+        assert_eq!(enzymes_of(&protocol, "cut_vector"), names(&["EcoRI"]));
+        let ran = run(&protocol, &maps(), EnzymeDb::builtin());
+        assert_eq!(ran.step("product").unwrap().status, Status::NeedsChoice, "one enzyme: the insert fits either way round");
+        // One tail at a time, as a click on an enzyme for one primer sets them. The cut that
+        // trims the tails and the vector follow each click.
+        protocol.set_tails("pcr_donor", Some("BglII".into()), None, true).unwrap();
+        let params = amplify_params(&protocol, "pcr_donor");
+        assert_eq!((params.forward_enzyme.as_deref(), params.reverse_enzyme.as_deref()), (Some("BglII"), None));
+        assert_eq!(enzymes_of(&protocol, "cut_pcr"), names(&["BglII"]));
+        assert_eq!(enzymes_of(&protocol, "cut_vector"), names(&["BglII"]));
+        assert!(protocol.set_tails("cut_pcr", None, None, true).is_err(), "only a PCR has tails");
+        // Three enzymes do not fit two tails.
+        assert!(protocol.set_enzymes("pcr_donor", names(&["EcoRI", "BamHI", "KpnI"]), true).is_err());
+        assert!(protocol.set_enzymes("cut_pcr", names(&["EcoRI", "BamHI", "KpnI"]), true).is_err());
+        // A donor's cut is tied to its own sites, so it does not follow the vector.
+        let mut same = template();
+        same.vector_enzymes.clear();
+        let mut both = Protocol::restriction_cloning(&same);
+        both.set_enzymes("cut_vector", names(&["KpnI", "SalI"]), false).unwrap();
+        assert_eq!(enzymes_of(&both, "cut_donor"), names(&["EcoRI", "BamHI"]));
+    }
+
+    #[test]
+    fn a_lane_switches_between_cutting_the_part_out_and_copying_it() {
+        let mut protocol = Protocol::restriction_cloning(&template());
+        // Copying the part out puts a PCR between the donor and its cut, with the cut's part and
+        // the cut's enzymes on the primers' tails.
+        assert_eq!(protocol.copy_out("donor").unwrap(), "pcr_donor");
+        assert_eq!(ids(&protocol), vec!["vector", "cut_vector", "backbone", "cip", "donor", "pcr_donor", "cut_donor", "insert", "product"]);
+        let params = amplify_params(&protocol, "pcr_donor");
+        assert_eq!(
+            (params.region.as_deref(), params.forward_enzyme.as_deref(), params.reverse_enzyme.as_deref()),
+            (Some("geneX"), Some("EcoRI"), Some("BamHI"))
+        );
+        assert_eq!(protocol.step("cut_donor").unwrap().inputs, names(&["pcr_donor"]));
+        assert_eq!(protocol.amplify_before("cut_donor"), Some("pcr_donor"));
+        assert_eq!(protocol.digest_after("pcr_donor"), Some("cut_donor"));
+        assert_eq!(part_role(&protocol, "cut_donor"), Some(PartRole::Keep));
+        let ran = run(&protocol, &maps(), EnzymeDb::builtin());
+        assert_eq!(ran.step("product").unwrap().status, Status::Done, "{:?}", ran.step("product").unwrap().error);
+        assert!(ran.step("product").unwrap().outputs[0].doc.features.iter().any(|f| f.name == "geneX"));
+        // And back: the PCR goes, the cut works on the donor with the tail enzymes, and the pick
+        // asks for the piece that holds geneX, as before.
+        assert_eq!(protocol.cut_out("insert").unwrap(), "cut_donor");
+        assert_eq!(protocol, Protocol::restriction_cloning(&template()));
+        // Neither can be done twice, a vector's cut takes a part out rather than freeing one, and
+        // a lane needs a cut.
+        assert!(protocol.cut_out("donor").is_err());
+        let mut replaced = template();
+        replaced.replace = Some("1001..1100".into());
+        let mut protocol = Protocol::restriction_cloning(&replaced);
+        assert!(protocol.copy_out("vector").is_err());
+        assert!(protocol.copy_out("nothing").is_err());
+        protocol.steps.push(open("spare", "donor.dna"));
+        assert!(protocol.copy_out("spare").is_err());
+        assert!(protocol.copy_out("cut_donor").is_ok());
+        assert!(protocol.copy_out("cut_donor").is_err(), "the lane copies already");
+    }
+
+    #[test]
+    fn a_pcr_lane_is_changed_through_its_file() {
+        let db = EnzymeDb::builtin();
+        let folder = std::env::temp_dir().join(format!("slopgene-protocol-pcr-{}", std::process::id()));
+        std::fs::create_dir_all(&folder).unwrap();
+        let Memory(docs) = maps();
+        for (name, doc) in &docs {
+            crate::io::write_path(doc, folder.join(name).with_extension("gb"), None).unwrap();
+        }
+        let new = NewFile {
+            vector: folder.join("vector.gb"),
+            insert: folder.join("donor.gb"),
+            enzymes: names(&["BglII", "EcoRI"]),
+            cut_out: Some("geneX".into()),
+            dephosphorylate: true,
+            pcr: true,
+            ..NewFile::default()
+        };
+        let path = folder.join("pcr.json");
+        let (protocol, ran) = write_new(&path, &new, false, db).unwrap();
+        assert_eq!(ids(&protocol), vec!["vector", "cut_vector", "backbone", "cip", "donor", "pcr_donor", "cut_pcr", "insert", "product"]);
+        assert!(ran.steps.iter().all(|s| s.status == Status::Done), "{}", ran.text(&protocol));
+        // Keeping pair 2 writes it into the file. A pair that was not designed is refused.
+        let keep = |pair: Option<usize>, forward: Option<String>, reverse: Option<String>| Change::Primers { step: "pcr_donor".into(), pair, forward, reverse };
+        let (changed, _, said) = change_file(&path, db, &keep(Some(2), None, None)).unwrap();
+        assert!(said.starts_with("pcr_donor keeps primer pair 2: "), "{said}");
+        let params = amplify_params(&changed, "pcr_donor");
+        assert!(params.pinned());
+        assert!(change_file(&path, db, &keep(Some(99), None, None)).is_err());
+        assert!(change_file(&path, db, &keep(Some(1), params.forward_primer.clone(), None)).is_err());
+        // Primers typed in, and a new design.
+        let (_, _, said) = change_file(&path, db, &keep(None, params.forward_primer.clone(), params.reverse_primer.clone())).unwrap();
+        assert_eq!(said, "pcr_donor uses the primers given");
+        let (_, _, said) = change_file(&path, db, &keep(None, None, None)).unwrap();
+        assert_eq!(said, "pcr_donor designs its primers anew");
+        // New tails through the cut change (the same two enzymes the other way round), told as a
+        // PCR's, with the steps that follow.
+        let tails = Change::Cut { step: "pcr_donor".into(), part: None, enzymes: Some(names(&["EcoRI", "BglII"])) };
+        let (_, _, said) = change_file(&path, db, &tails).unwrap();
+        assert_eq!(said, "pcr_donor puts EcoRI and BglII on its primers; cut_vector and cut_pcr follow it");
+        let part = Change::Cut { step: "pcr_donor".into(), part: Some(Some("301..600".into())), enzymes: None };
+        assert_eq!(change_file(&path, db, &part).unwrap().2, "pcr_donor copies 301..600");
+        // Back to a cut and to a PCR again.
+        let (_, _, said) = change_file(&path, db, &Change::CutOut { step: "donor".into() }).unwrap();
+        assert_eq!(said, "cut_pcr cuts the part out of donor again, without a PCR");
+        let (_, ran, said) = change_file(&path, db, &Change::CopyOut { step: "cut_pcr".into() }).unwrap();
+        assert_eq!(said, "pcr_donor copies the part out of donor by PCR, and cut_pcr trims its tails");
+        assert_eq!(ran.step("product").unwrap().status, Status::Done, "{:?}", ran.step("product").unwrap().error);
+        // A second map, copied out by PCR too.
+        let add = Change::AddMap { map: folder.join("donor.gb"), cut_out: Some("geneX".into()), enzymes: names(&["EcoRI", "BamHI"]), pcr: true };
+        let (changed, _, said) = change_file(&path, db, &add).unwrap();
+        assert_eq!(said, "added donor as donor_2, copied out by PCR; insert_2 keeps its piece");
+        assert!(changed.step("pcr_donor_2").is_some());
+        let _ = std::fs::remove_dir_all(&folder);
     }
 }

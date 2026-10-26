@@ -515,6 +515,10 @@ enum ProtocolCommand {
         /// Leave the backbone's 5' phosphates on (no dephosphorylation step).
         #[arg(long)]
         keep_phosphates: bool,
+        /// Copy the insert out of its map by PCR, with the enzymes' sites on the primers' tails,
+        /// rather than cut it out. The cut of the PCR product then trims the tails.
+        #[arg(long)]
+        pcr: bool,
         /// Replace the protocol file if it exists.
         #[arg(long)]
         force: bool,
@@ -532,9 +536,14 @@ enum ProtocolCommand {
         /// Enzymes that cut it out, e.g. EcoRI,BamHI. Without them the cut waits for enzymes.
         #[arg(short, long)]
         enzymes: Option<String>,
+        /// Copy the part out by PCR, with the enzymes' sites on the primers' tails, rather than
+        /// cut it out.
+        #[arg(long)]
+        pcr: bool,
     },
     /// Change a cut: the part it is about, its enzymes or both. A vector cut with the insert's
-    /// enzymes takes the new ones too. The file is changed and run.
+    /// enzymes takes the new ones too. For a PCR step, the part is the one it copies and the
+    /// enzymes go on its primers' tails. The file is changed and run.
     Cut {
         /// The protocol file (.json).
         path: String,
@@ -626,6 +635,43 @@ enum ProtocolCommand {
         /// when both ways fit).
         #[arg(long)]
         way: String,
+    },
+    /// Copy a map's part out by PCR instead of cutting it out: a PCR step goes between the map
+    /// and its cut, with the cut's enzymes on the primers' tails, and the cut then trims the
+    /// tails. The file is changed and run.
+    CopyOut {
+        /// The protocol file (.json).
+        path: String,
+        /// Any step of the map's lane: the map (such as donor), its cut or its pick.
+        step: String,
+    },
+    /// Cut a map's part out instead of copying it by PCR, the reverse of copy-out. The file is
+    /// changed and run.
+    CutOut {
+        /// The protocol file (.json).
+        path: String,
+        /// Any step of the map's lane: the map (such as donor), its PCR, its cut or its pick.
+        step: String,
+    },
+    /// The primers of a PCR step: keep one of the pairs the run designs, use two of your own, or
+    /// design them anew on each run. The file is changed and run.
+    Primers {
+        /// The protocol file (.json).
+        path: String,
+        /// The PCR step, such as pcr_donor.
+        step: String,
+        /// Keep this pair of those `protocol run` lists, counted from 1 (1 is the best).
+        #[arg(long, conflicts_with_all = ["fwd", "rev", "clear"])]
+        pair: Option<usize>,
+        /// The forward primer, 5' to 3' with its tail.
+        #[arg(long, requires = "rev", conflicts_with = "clear")]
+        fwd: Option<String>,
+        /// The reverse primer, 5' to 3' with its tail.
+        #[arg(long, requires = "fwd")]
+        rev: Option<String>,
+        /// Forget the kept primers, so the run designs them anew.
+        #[arg(long)]
+        clear: bool,
     },
 }
 
@@ -827,7 +873,7 @@ fn run(command: Command) -> anyhow::Result<Output> {
         }),
         Command::Protocol { action } => match action {
             ProtocolCommand::Run { path, choose, save, out_dir } => protocol_cmd::run(&path, &choose, save, out_dir.as_deref()),
-            ProtocolCommand::New { path, vector, insert, enzymes, vector_enzymes, cut_out, replace, name, keep_phosphates, force } => {
+            ProtocolCommand::New { path, vector, insert, enzymes, vector_enzymes, cut_out, replace, name, keep_phosphates, pcr, force } => {
                 protocol_cmd::new_cloning(&protocol_cmd::CloningPlan {
                     path: &path,
                     vector: &vector,
@@ -838,13 +884,14 @@ fn run(command: Command) -> anyhow::Result<Output> {
                     replace: replace.as_deref(),
                     name: name.as_deref(),
                     keep_phosphates,
+                    pcr,
                     force,
                 })
             }
             // The changes the app's bench makes, each a `protocol::Change` made to the file.
-            ProtocolCommand::Add { path, map, cut_out, enzymes } => {
+            ProtocolCommand::Add { path, map, cut_out, enzymes, pcr } => {
                 let enzymes = protocol_cmd::enzyme_names(enzymes.as_deref().unwrap_or(""))?;
-                protocol_cmd::change(&path, Change::AddMap { map: map.into(), cut_out, enzymes })
+                protocol_cmd::change(&path, Change::AddMap { map: map.into(), cut_out, enzymes, pcr })
             }
             ProtocolCommand::Cut { path, step, part, no_part, enzymes } => {
                 let part = if no_part { Some(None) } else { part.map(Some) };
@@ -862,6 +909,14 @@ fn run(command: Command) -> anyhow::Result<Output> {
             ProtocolCommand::Turn { path, piece, join, way } => {
                 let way = Orientation::parse(&way).ok_or_else(|| anyhow::anyhow!("--way takes forward, reverse or either (got '{way}')"))?;
                 protocol_cmd::change(&path, Change::Turn { piece, join, way })
+            }
+            ProtocolCommand::CopyOut { path, step } => protocol_cmd::change(&path, Change::CopyOut { step }),
+            ProtocolCommand::CutOut { path, step } => protocol_cmd::change(&path, Change::CutOut { step }),
+            ProtocolCommand::Primers { path, step, pair, fwd, rev, clear } => {
+                if pair.is_none() && fwd.is_none() && !clear {
+                    anyhow::bail!("say what to do with the primers: --pair N, --fwd and --rev, or --clear");
+                }
+                protocol_cmd::change(&path, Change::Primers { step, pair, forward: fwd, reverse: rev })
             }
         },
         Command::Annotate { files, library, min_identity, min_length, output, in_place, save_library } => {

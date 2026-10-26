@@ -321,6 +321,8 @@ pub struct StartOptions {
     pub new_protocol: bool,
     /// Enzymes that cut the insert out of the new protocol's donor.
     pub enzymes: Option<String>,
+    /// Copy the new protocol's insert out by PCR, with the enzymes' sites on the primers' tails.
+    pub pcr: bool,
     /// Save a screenshot of the window to this file after `screenshot_after` frames, then quit.
     pub screenshot: Option<PathBuf>,
     pub screenshot_after: u64,
@@ -514,14 +516,15 @@ impl SlopGeneApp {
             app.run_digest();
         }
         // `--new-protocol` starts a cloning protocol from the maps open, and `--enzymes` cuts its
-        // insert out with those enzymes.
+        // insert out with those enzymes, or with `--pcr` puts them on the primers' tails.
         if start.new_protocol {
-            app.new_cloning_protocol();
+            app.new_cloning_protocol(start.pcr);
             if let (Some(enzymes), Front::Protocol(ii)) = (&start.enzymes, app.front) {
                 let names: Vec<String> = enzymes.split([',', ' ', ';', '+']).filter(|s| !s.is_empty()).map(str::to_string).collect();
                 let tab = &mut app.protocols[ii];
+                let step = if start.pcr { "pcr_donor" } else { "cut_donor" };
                 tab.change(None, |p| {
-                    let _ = p.set_enzymes("cut_donor", names, true);
+                    let _ = p.set_enzymes(step, names, true);
                 });
                 tab.refresh(&app.tabs, true);
             }
@@ -675,7 +678,7 @@ impl SlopGeneApp {
         }
         match action {
             Action::Open => self.open_dialog(),
-            Action::NewProtocol => self.new_cloning_protocol(),
+            Action::NewProtocol => self.new_cloning_protocol(false),
             Action::NewSequence => {
                 self.new_sequence = Some(NewSequenceDialog { name: "untitled".into(), sequence: String::new(), circular: true, error: None })
             }
@@ -1060,7 +1063,7 @@ impl SlopGeneApp {
     /// map. The next open DNA map takes the other part. The region marked on each map becomes the
     /// part to cut out, or the part of the vector the insert replaces. The enzymes are chosen on
     /// the bench, so the protocol opens on the insert's cut.
-    fn new_cloning_protocol(&mut self) {
+    fn new_cloning_protocol(&mut self, pcr: bool) {
         let dna: Vec<usize> = (0..self.tabs.len()).filter(|&ii| self.tabs[ii].doc.molecule == Molecule::Dna).collect();
         let front = Some(self.active).filter(|ii| self.front == Front::Document && dna.contains(ii));
         let marked = front.filter(|&ii| self.tabs[ii].selection.is_some());
@@ -1111,6 +1114,7 @@ impl SlopGeneApp {
                     insert,
                     replace: vector.and_then(part),
                     dephosphorylate: true,
+                    pcr,
                     ..CloningTemplate::default()
                 })
             }
@@ -1119,7 +1123,7 @@ impl SlopGeneApp {
         let mut tab = ProtocolTab::new(protocol, None);
         tab.dirty = true;
         tab.refresh(&self.tabs, true);
-        tab.selected = tab.protocol.steps.iter().position(|s| s.id == "cut_donor").unwrap_or(0);
+        tab.selected = tab.protocol.steps.iter().position(|s| s.id == if pcr { "pcr_donor" } else { "cut_donor" }).unwrap_or(0);
         self.add_protocol(tab);
     }
 

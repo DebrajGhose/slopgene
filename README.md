@@ -61,7 +61,7 @@ The command line sits beside the app.
 | Enzymes | 581 commercial enzymes from REBASE, named sets, unique cutters, digests with exact sticky ends |
 | Primers | nearest-neighbour Tm, binding sites with mismatches, dimer and hairpin checks, primer design |
 | Cloning | PCR, restriction cloning, Gibson / HiFi / In-Fusion assembly, Golden Gate, and the enzymes that cut nearest a marked part |
-| Protocols | constructions built step by step on a bench of small plasmids that zoom into full maps (open, cut, keep, dephosphorylate, flip, join), with every junction checked |
+| Protocols | constructions built step by step on a bench of small plasmids that zoom into full maps with the bases under them (open, cut, copy by PCR, keep, dephosphorylate, flip, join), with every junction checked |
 | Analysis | ORFs in six frames, motif and protein search, virtual agarose gels, mass, pI |
 | Alignment | align sequencing reads or other sequences to a map (any rotation or strand) and show the aligned bases, with protein effects of each change and structural changes (deletions, insertions, duplications, inversions, dimers) |
 | Annotation | detect features from a library of your own annotated maps |
@@ -182,8 +182,19 @@ The part being worked on is turned to the top of its ring.
 Under each plasmid sits its cut, where the ring breaks at the cuts and the pieces pull away from it.
 Green pieces go on into the new plasmid, and red pieces are left over.
 Arrows carry the kept pieces down to the join, which draws the new plasmid.
-Each card says what its step does: Start, Cut or Join.
+Each card says what its step does: Start, Cut, Copy or Join.
 A dephosphorylation rides on its arrow as a label.
+
+A part can be copied out by PCR instead of cut out.
+The menu of a plasmid's card or its cut's offers "Copy the part out by PCR instead", and the lane gains a Copy card between the plasmid and its cut.
+The Copy card draws the PCR product as a bar: the copy in green, with the primers' tails in grey at its ends.
+The panel designs primers for the part and lists the enzymes that can go on their tails, with those that open the vector once first.
+One click per primer puts an enzyme's site on its tail.
+The cut after the PCR trims the tails, so the piece has the sticky ends the vector has.
+The vector's enzymes carry over to the tails, and new tails carry over to the vector.
+The primers are designed anew on each run until "Keep these primers" writes them into the protocol, so they stay as they are when a map changes.
+Each primer has a Copy button, and the other pairs designed are a click away.
+"Cut the part out instead" turns the lane back.
 
 A click on a ring zooms into its detailed view, and "All steps" or Escape zooms back out.
 A plasmid zooms into its full map, which is where its cut is chosen.
@@ -194,6 +205,9 @@ The chosen cuts are bold and drawn in the accent colour, and a second click take
 A cut that has no pieces yet zooms into its plasmid's map in the same way.
 A cut with pieces zooms into them at full size, where a click on a piece keeps it.
 A join zooms into the full map of the new plasmid, with the insert shaded and the junctions marked.
+Under each zoomed picture, the molecule's bases are shown as a sequence view with the same stretch highlighted: the part on a plasmid, the piece kept in a cut, the insert in a join.
+A stretch selected in either view shows in both, and one selected under a plasmid becomes the part.
+The Sequence button hides the bases and brings them back, and the handle between the two moves the split.
 
 The bench is built up by dragging.
 Drag a cut's green piece onto another plasmid to put the piece into it.
@@ -239,7 +253,7 @@ The up and down arrows walk through the steps.
 Open as a tab opens a map or the new plasmid as a sequence of its own.
 A protocol takes a map from its open tab when there is one, so unsaved edits count.
 It saves as a `.json` file beside its maps, and `slopgene protocol run` runs the same file from the command line.
-The command line makes the bench's changes too, with `slopgene protocol add`, `cut`, `keep`, `put`, `take-out`, `remove-map`, `leave-out`, `dephosphorylate` and `turn`.
+The command line makes the bench's changes too, with `slopgene protocol add`, `cut`, `keep`, `put`, `take-out`, `remove-map`, `leave-out`, `dephosphorylate`, `turn`, `copy-out`, `cut-out` and `primers`.
 Scripts make them with `protocol_add`, `protocol_cut`, `protocol_put` and the other functions in [docs/scripting.md](docs/scripting.md).
 
 ## Building from source

@@ -2,7 +2,7 @@
 //!
 //! Usage: `slopgene-gui [FILES...] [--dark] [--view map|sequence|split|alignment] [--select A..B]
 //! [--feature NAME] [--palette] [--console] [--digest ENZYMES] [--align READ] [--step N]
-//! [--zoom] [--new-protocol [--enzymes NAMES]] [--size WxH] [--screenshot OUT.png [--after FRAMES] [--drag X1,Y1,X2,Y2]]`
+//! [--zoom] [--new-protocol [--enzymes NAMES] [--pcr]] [--size WxH] [--screenshot OUT.png [--after FRAMES] [--drag X1,Y1,X2,Y2]]`
 //!
 //! A file may be a protocol (`slopgene.protocol/1` JSON), which opens in a protocol tab.
 //!
@@ -11,7 +11,8 @@
 //! `--step N` shows step N (from 1) of the protocol that opens, and `--zoom` zooms into its
 //! card. `--new-protocol` starts a cloning protocol from the files open, and `--enzymes` cuts its
 //! insert out with those enzymes. The region marked with `--select` or `--feature` on the file
-//! in front is the part it cuts out.
+//! in front is the part it cuts out. `--pcr` copies the part out by PCR instead, with the
+//! enzymes' sites on the primers' tails.
 //!
 //! `--screenshot` renders the window, saves it as PNG and quits; it is used to check the
 //! interface without a person at the screen. `--drag` plays a held drag into it first, from one
@@ -68,6 +69,7 @@ fn parse_args() -> (StartOptions, [f32; 2]) {
             }
             "--new-protocol" => options.new_protocol = true,
             "--enzymes" => options.enzymes = args.next(),
+            "--pcr" => options.pcr = true,
             "--screenshot" => options.screenshot = args.next().map(PathBuf::from),
             "--after" => options.screenshot_after = args.next().and_then(|n| n.parse().ok()).unwrap_or(12),
             "--size" => {
@@ -77,7 +79,7 @@ fn parse_args() -> (StartOptions, [f32; 2]) {
             }
             "-h" | "--help" => {
                 println!(
-                    "slopgene-gui [FILES...] [--dark] [--view map|sequence|split|alignment] [--select A..B] [--feature NAME] [--palette] [--console] [--digest ENZYMES] [--align READ] [--step N] [--zoom] [--new-protocol [--enzymes NAMES]] [--size WxH] [--screenshot OUT.png [--after N] [--drag X1,Y1,X2,Y2]]"
+                    "slopgene-gui [FILES...] [--dark] [--view map|sequence|split|alignment] [--select A..B] [--feature NAME] [--palette] [--console] [--digest ENZYMES] [--align READ] [--step N] [--zoom] [--new-protocol [--enzymes NAMES] [--pcr]] [--size WxH] [--screenshot OUT.png [--after N] [--drag X1,Y1,X2,Y2]]"
                 );
                 std::process::exit(0);
             }

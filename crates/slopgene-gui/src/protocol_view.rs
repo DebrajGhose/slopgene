@@ -3,12 +3,17 @@
 //! Each map the protocol starts from heads a column, drawn as a small ring. Under it sits its
 //! cut: the same ring broken where the enzymes cut, with the pieces pulled apart. Green pieces go
 //! on into the product and red pieces are left over. Arrows carry the kept pieces down to the
-//! join, which draws the new plasmid. The whole protocol is on the one bench.
+//! join, which draws the new plasmid. The whole protocol is on the one bench. A map whose part is
+//! copied out by PCR has a PCR card between it and its cut, which draws the product as a bar: the
+//! copy in green with the primers' tails in grey, which the cut then trims off.
 //!
 //! A click on a ring zooms into its detailed view. A plasmid shows its full map, where a click on
 //! a feature marks the part to cut around and a click on an enzyme cuts there. A cut shows its
 //! pieces at full size, where a click on a piece keeps it. A join shows the full map of the new
 //! plasmid. "All steps" (or Escape) zooms back out. Both zooms animate, so the eye can follow.
+//! Under the picture, the molecule's bases are shown as a sequence view with the same stretch
+//! highlighted: the part on a plasmid, the piece kept in a cut, the insert in a join. A stretch
+//! selected in either view shows in both, and one selected under a plasmid becomes the part.
 //!
 //! The panel on the right tells the step in plain words (`slopgene_core::protocol::story`) and
 //! holds its choices. For a cut, it lists the enzymes that cut nearest the part on each side
@@ -24,15 +29,17 @@ use crate::doc::DocTab;
 use crate::map_view;
 use crate::panels::{ENZYME_SETS, section_title};
 use crate::scene_paint::{self, EguiMeasure, hit, paint};
+use crate::seq_view;
 use crate::style::{self, Palette};
 use eframe::egui::{
     self, Align2, Color32, CornerRadius, CursorIcon, DragAndDrop, Key, LayerId, Order, Pos2, Rect, RichText, Sense, Stroke, UiBuilder, pos2, vec2,
 };
-use slopgene_core::enzymes::EnzymeDb;
+use slopgene_core::enzymes::{EnzymeDb, cut_counts};
 use slopgene_core::excise::{self, NearCut, NearestCuts};
 use slopgene_core::gel::{GelOptions, Ladder, Lane, render_gel};
 use slopgene_core::protocol::{
-    self, Action, DigestParams, LigateParams, OpenParams, Orientation, PartRole, PickParams, Piece, Protocol, Run, Status, Step, StepRun, split_reference,
+    self, Action, AmplifyParams, DigestParams, LigateParams, OpenParams, Orientation, PartRole, PickParams, Piece, Protocol, Run, Status, Step, StepRun,
+    split_reference,
 };
 use slopgene_core::render::ring::{self, RingOptions, RingPiece, Role};
 use slopgene_core::render::{MapOptions, Rgba, Scene, SiteMark, Tag, Theme, render_map, thousands};
@@ -111,6 +118,15 @@ pub struct ProtocolTab {
     pub set: String,
     /// The nearest cuts as last listed, and what they were listed for.
     near: Option<(NearKey, NearestCuts)>,
+    /// The enzymes that can go on a PCR's primer tails, as last listed, and what they were
+    /// listed for.
+    tails: Option<(NearKey, Vec<TailChoice>)>,
+    /// The sequence under a zoomed card's picture, kept from frame to frame.
+    preview: Option<Preview>,
+    /// Whether a zoomed card shows the molecule's bases under its picture.
+    pub show_sequence: bool,
+    /// The share of a zoomed card's height that the sequence pane takes.
+    pub sequence_share: f32,
     /// A short note for the status bar.
     pub notice: Option<(String, Instant)>,
 }
@@ -170,6 +186,10 @@ impl ProtocolTab {
             rings: Vec::new(),
             set: "common".into(),
             near: None,
+            tails: None,
+            preview: None,
+            show_sequence: true,
+            sequence_share: 0.4,
             notice: None,
         }
     }
@@ -377,12 +397,55 @@ impl ProtocolTab {
         self.near.as_ref().map(|(_, n)| n)
     }
 
+    /// The enzymes of the set that could go on the primer tails of PCR step `step`: each with
+    /// whether it cuts inside the part, which rules it out, and how often it cuts the vector the
+    /// copy goes into. Listed again only when the protocol, its maps or the enzyme set changed.
+    fn tails(&mut self, step: usize) -> Option<&[TailChoice]> {
+        let key: NearKey = (self.revision, self.run_key.clone(), step, self.set.clone());
+        if self.tails.as_ref().is_none_or(|(k, _)| *k != key) {
+            let result = self.run.steps.get(step)?;
+            let template = result.inputs.first()?;
+            let region = result.findings.region?;
+            let enzymes = EnzymeDb::builtin().set(&self.set).unwrap_or_default();
+            let bases = region.extract(&template.doc.seq);
+            let inside = cut_counts(&bases, false, &enzymes);
+            let vector = other_plasmid(&self.protocol, &self.run, step);
+            let in_vector = vector.as_ref().map(|v| cut_counts(&v.seq, v.is_circular(), &enzymes));
+            let mut found: Vec<TailChoice> = inside
+                .iter()
+                .enumerate()
+                .map(|(ii, (enzyme, count))| TailChoice {
+                    name: enzyme.name.clone(),
+                    cuts_part: *count > 0,
+                    vector_cuts: in_vector.as_ref().and_then(|v| v.get(ii)).map(|(_, n)| *n),
+                })
+                .collect();
+            // The enzymes that open the vector once come first, as the tails must match the
+            // vector's ends, then the rest by name.
+            found.sort_by(|a, b| {
+                (a.vector_cuts != Some(1)).cmp(&(b.vector_cuts != Some(1))).then_with(|| a.name.to_ascii_lowercase().cmp(&b.name.to_ascii_lowercase()))
+            });
+            self.tails = Some((key, found));
+        }
+        self.tails.as_ref().map(|(_, t)| t.as_slice())
+    }
+
     /// Show step `step` in detail, with a zoom from its card.
     pub fn zoom_to(&mut self, step: usize) {
         self.selected = step.min(self.protocol.steps.len().saturating_sub(1));
         self.zoom = Some(step);
         self.zoom_last = Some(step);
     }
+}
+
+/// An enzyme of the set, as a choice for a primer's tail.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct TailChoice {
+    name: String,
+    /// Whether it cuts inside the part, in which case it would cut the product too.
+    cuts_part: bool,
+    /// How often it cuts the vector the copy goes into, when there is one.
+    vector_cuts: Option<usize>,
 }
 
 /// The join that the pieces of step `step` go into, and which of its inputs they are.
@@ -439,6 +502,8 @@ enum Kind {
     Plasmid,
     /// A cut, with the picks that keep its pieces.
     Cut,
+    /// A PCR, which draws its product: the part copied, with the primers' tails on its ends.
+    Copy,
     /// A join, which draws the product.
     Join,
     /// Any other step, told in words.
@@ -497,6 +562,21 @@ impl Board {
     /// The plasmid card that leads into cut card `card`, the other way round from `cut_after`.
     fn plasmid_before(&self, card: usize) -> Option<usize> {
         self.links.iter().find(|l| l.to == card && self.cards[l.from].kind == Kind::Plasmid).map(|l| l.from)
+    }
+
+    /// The PCR card that a card leads into, such as a plasmid's PCR.
+    fn copy_after(&self, card: usize) -> Option<usize> {
+        self.links.iter().find(|l| l.from == card && self.cards[l.to].kind == Kind::Copy).map(|l| l.to)
+    }
+
+    /// The card that leads into card `card`, whatever it is: the plasmid or the PCR before a cut.
+    fn before(&self, card: usize) -> Option<usize> {
+        self.links.iter().find(|l| l.to == card).map(|l| l.from)
+    }
+
+    /// The step whose part a plasmid card's map sets: the PCR after the plasmid, or else its cut.
+    fn part_step_after(&self, card: usize) -> Option<usize> {
+        self.copy_after(card).or_else(|| self.cut_after(card)).and_then(|c| self.cards[c].step)
     }
 
     /// The bench's size at scale 1.
@@ -564,6 +644,7 @@ fn board(protocol: &Protocol, run: &Run) -> Board {
         let card = match &step.action {
             Action::Open(_) => add_card(&mut board, &mut columns, Kind::Plasmid, ii, None),
             Action::Digest(_) => add_card(&mut board, &mut columns, Kind::Cut, ii, source.as_ref()),
+            Action::Amplify(_) => add_card(&mut board, &mut columns, Kind::Copy, ii, source.as_ref()),
             Action::Pick(_) => match &source {
                 Some((card, treatments)) if board.cards[*card].kind == Kind::Cut && treatments.is_empty() => {
                     board.cards[*card].picks.push(ii);
@@ -713,6 +794,20 @@ fn cut_view(tab: &ProtocolTab, card: &Card) -> Option<CutView> {
         .or_else(|| view.pieces.iter().map(|p| p.0).min_by_key(|s| s.len()));
     view.top = focus.map_or(0, |s| (s.start + s.len() / 2) % len);
     Some(view)
+}
+
+/// The part PCR step `step` copies, as found on its template in the run, with the template's
+/// length and shape.
+fn copy_region(tab: &ProtocolTab, step: usize) -> Option<(Span, usize, bool)> {
+    let result = tab.run.steps.get(step)?;
+    let template = result.inputs.first()?;
+    Some((result.findings.region?, template.doc.len().max(1), template.doc.is_circular()))
+}
+
+/// The tails on the product of a PCR, in bases at each end, as the run found them.
+fn tail_lengths(result: &StepRun) -> (usize, usize) {
+    let [left, right] = result.findings.tails;
+    (left, right)
 }
 
 /// The middle base of the last part of a product (the insert, in a template's join), to turn to
@@ -870,6 +965,32 @@ fn picture(tab: &ProtocolTab, board: &Board, card: usize, detail: bool, settings
                 options.gaps = view.cut;
                 options.marks = view.cuts;
                 options.pieces = view.pieces.iter().map(|(span, role, _)| RingPiece { span: *span, role: *role, lift: 0.0, label: None }).collect();
+            } else if let Some((region, len, circular)) = board.copy_after(card).and_then(|c| board.cards[c].step).and_then(|s| copy_region(tab, s)) {
+                // A plasmid a PCR copies from shows the part copied. The rest stays as it is, so
+                // it is neither kept nor left over.
+                options.top = (region.start + region.len() / 2) % len;
+                options.gaps = false;
+                options.pieces = vec![RingPiece { span: region, role: Role::Kept, lift: 0.0, label: None }];
+                options.pieces.extend(complement(region, len, circular).into_iter().map(|s| RingPiece { span: s, role: Role::Plain, lift: 0.0, label: None }));
+            }
+            Some(Picture { doc, options })
+        }
+        Kind::Copy => {
+            // The product as a bar: the copy of the part in green, with the primers' tails in grey
+            // at its ends, where the enzyme sites are.
+            let doc = result.outputs.first()?.doc.clone();
+            let len = doc.len();
+            let (left, right) = tail_lengths(result);
+            let (left, right) = (left.min(len), right.min(len.saturating_sub(left)));
+            options.title = Some("PCR product".into());
+            options.subtitle = Some(format!("{} bp", thousands(len)));
+            options.gaps = false;
+            if left > 0 {
+                options.pieces.push(RingPiece { span: Span::new(0, left), role: Role::Plain, lift: 0.0, label: None });
+            }
+            options.pieces.push(RingPiece { span: Span::new(left, len - right), role: Role::Kept, lift: 0.0, label: None });
+            if right > 0 {
+                options.pieces.push(RingPiece { span: Span::new(len - right, len), role: Role::Plain, lift: 0.0, label: None });
             }
             Some(Picture { doc, options })
         }
@@ -967,6 +1088,29 @@ enum Edit {
     AddSource(OpenParams),
     /// The enzyme set the chooser lists.
     Set(String),
+    /// Copy the part of this step's map out by PCR instead of cutting it out.
+    CopyOut(usize),
+    /// Cut the part of this step's map out instead of copying it by PCR.
+    CutOut(usize),
+    /// The primers of this PCR step.
+    Primers(usize, PrimerEdit),
+    /// Choose the enzyme whose site goes on one primer's tail of this PCR step: whether it is the
+    /// forward primer's, and the enzyme. The enzyme there already comes off.
+    PickTail(usize, bool, String),
+    /// Show or hide the molecule's bases under a zoomed card's picture.
+    ShowSequence(bool),
+    /// The share of a zoomed card's height the sequence pane takes.
+    SequenceShare(f32),
+}
+
+/// What to do with a PCR's primers.
+enum PrimerEdit {
+    /// Keep this pair (from 0) of those the run designed.
+    Pair(usize),
+    /// Use these two, as typed.
+    Given(String, String),
+    /// Design them anew on each run.
+    Clear,
 }
 
 /// A change to the step at `index`. A key merges quick changes of one field into one undo step.
@@ -1044,10 +1188,21 @@ fn piece_words(tab: &ProtocolTab, step: usize) -> String {
     }
 }
 
-/// The name of the map a cut works on, from the run, for messages.
+/// The name of the map a cut or a PCR works on, from the run, for messages.
 fn cut_map_name(tab: &ProtocolTab, cut: usize) -> String {
     let source = tab.protocol.steps.get(cut).and_then(|s| s.inputs.first()).and_then(|r| source_of(&tab.protocol, r));
     source.map(|s| map_name(tab, s)).unwrap_or_else(|| "the map".into())
+}
+
+/// The name of the map at the start of step `step`'s lane, whichever step of the lane it is.
+fn lane_map_name(tab: &ProtocolTab, step: usize) -> String {
+    tab.protocol
+        .steps
+        .get(step)
+        .and_then(|s| tab.protocol.source_of(&s.id))
+        .and_then(|id| tab.protocol.steps.iter().position(|s| s.id == id))
+        .map(|s| map_name(tab, s))
+        .unwrap_or_else(|| "the map".into())
 }
 
 /// Tell the person what an edit did, in the status bar, with the way back.
@@ -1235,6 +1390,90 @@ fn apply(tab: &mut ProtocolTab, edits: Vec<Edit>) -> Requests {
                 tell(tab, "Added the map. Click a feature or drag across it to mark the part to cut out.".into());
             }
             Edit::Set(name) => tab.set = name,
+            Edit::ShowSequence(on) => tab.show_sequence = on,
+            Edit::SequenceShare(share) => tab.sequence_share = share.clamp(0.15, 0.75),
+            Edit::CopyOut(step) => {
+                let Some(id) = tab.protocol.steps.get(step).map(|s| s.id.clone()) else { continue };
+                let map = lane_map_name(tab, step);
+                let mut outcome = Ok(String::new());
+                tab.change(None, |p| outcome = p.copy_out(&id));
+                match outcome {
+                    Ok(copy) => {
+                        // The PCR step is shown, where the tails are chosen.
+                        if let Some(index) = tab.protocol.steps.iter().position(|s| s.id == copy) {
+                            tab.selected = index;
+                        }
+                        tab.zoom = None;
+                        tell(tab, format!("The part is now copied out of {map} by PCR. Choose the enzymes for the primers' tails in the panel."));
+                    }
+                    Err(e) => tab.notice = Some((e.to_string(), Instant::now())),
+                }
+            }
+            Edit::CutOut(step) => {
+                let Some(id) = tab.protocol.steps.get(step).map(|s| s.id.clone()) else { continue };
+                let map = lane_map_name(tab, step);
+                let mut outcome = Ok(String::new());
+                tab.change(None, |p| outcome = p.cut_out(&id));
+                match outcome {
+                    Ok(cut) => {
+                        if let Some(index) = tab.protocol.steps.iter().position(|s| s.id == cut) {
+                            tab.selected = index;
+                        }
+                        tab.zoom = None;
+                        tell(tab, format!("The part is now cut out of {map} again, without a PCR."));
+                    }
+                    Err(e) => tab.notice = Some((e.to_string(), Instant::now())),
+                }
+            }
+            Edit::Primers(step, what) => {
+                let Some(id) = tab.protocol.steps.get(step).map(|s| s.id.clone()) else { continue };
+                let (forward, reverse) = match what {
+                    PrimerEdit::Pair(ii) => {
+                        let Some(pair) = tab.run.steps.get(step).and_then(|r| r.findings.primer_pairs.get(ii)) else { continue };
+                        (Some(pair.forward.clone()), Some(pair.reverse.clone()))
+                    }
+                    PrimerEdit::Given(f, r) => (Some(f), Some(r)),
+                    PrimerEdit::Clear => (None, None),
+                };
+                let kept = forward.is_some();
+                let mut outcome = Ok(());
+                tab.change(None, |p| outcome = p.set_primers(&id, forward, reverse));
+                if outcome.is_ok() {
+                    let text = if kept {
+                        "The primers are kept in the protocol, so they stay as they are when the maps change."
+                    } else {
+                        "The primers are designed anew on each run."
+                    };
+                    tell(tab, text.into());
+                }
+                report(tab, outcome);
+            }
+            Edit::PickTail(step, forward, name) => {
+                let Some((id, params)) = tab.protocol.steps.get(step).and_then(|s| match &s.action {
+                    Action::Amplify(a) => Some((s.id.clone(), a.clone())),
+                    _ => None,
+                }) else {
+                    continue;
+                };
+                // A click on the enzyme already there takes it off, as a second click on a switch
+                // would.
+                let (mut left, mut right) = (params.forward_enzyme.clone(), params.reverse_enzyme.clone());
+                let slot = if forward { &mut left } else { &mut right };
+                *slot = if slot.as_deref().is_some_and(|c| c.eq_ignore_ascii_case(&name)) { None } else { Some(name) };
+                let said = AmplifyParams { forward_enzyme: left.clone(), reverse_enzyme: right.clone(), ..AmplifyParams::default() }.enzymes();
+                let mut outcome = Ok(());
+                tab.change(None, |p| outcome = p.set_tails(&id, left, right, true));
+                if outcome.is_ok() {
+                    let map = cut_map_name(tab, step);
+                    let text = if said.is_empty() {
+                        format!("The primers for {map} have no tails.")
+                    } else {
+                        format!("The primers for {map} carry {} sites on their tails.", protocol::and_list(&said))
+                    };
+                    tell(tab, text);
+                }
+                report(tab, outcome);
+            }
         }
     }
     requests
@@ -1272,13 +1511,32 @@ fn file_name(path: &str) -> String {
 }
 
 /// The cut whose choices the panel and the detailed view offer: the step shown when it is a cut,
-/// the cut a pick belongs to, or the cut that follows a map.
+/// the cut a pick belongs to, or the cut that follows a map. The cut that trims a PCR's tails has
+/// no choices of its own, so it is left out.
 fn focused_cut(tab: &ProtocolTab, board: &Board) -> Option<usize> {
     let step = tab.protocol.steps.get(tab.selected)?;
-    match &step.action {
+    let cut = match &step.action {
         Action::Digest(_) => Some(tab.selected),
         Action::Pick(_) => board.card_of(tab.selected).and_then(|c| board.cards[c].step).filter(|&s| matches!(tab.protocol.steps[s].action, Action::Digest(_))),
         Action::Open(_) => board.card_of(tab.selected).and_then(|c| board.cut_after(c)).and_then(|c| board.cards[c].step),
+        _ => None,
+    }?;
+    tab.protocol.amplify_before(&tab.protocol.steps[cut].id).is_none().then_some(cut)
+}
+
+/// The PCR whose choices the panel and the detailed view offer: the step shown when it is a PCR,
+/// the PCR whose product a cut or a pick works on, or the PCR that follows a map.
+fn focused_copy(tab: &ProtocolTab, board: &Board) -> Option<usize> {
+    let step = tab.protocol.steps.get(tab.selected)?;
+    let index_of = |id: &str| tab.protocol.steps.iter().position(|s| s.id == id);
+    match &step.action {
+        Action::Amplify(_) => Some(tab.selected),
+        Action::Digest(_) => tab.protocol.amplify_before(&step.id).and_then(index_of),
+        Action::Pick(_) => {
+            let cut = board.card_of(tab.selected).and_then(|c| board.cards[c].step)?;
+            tab.protocol.amplify_before(&tab.protocol.steps[cut].id).and_then(index_of)
+        }
+        Action::Open(_) => board.card_of(tab.selected).and_then(|c| board.copy_after(c)).and_then(|c| board.cards[c].step),
         _ => None,
     }
 }
@@ -1292,6 +1550,8 @@ pub fn show(ui: &mut egui::Ui, tab: &mut ProtocolTab, docs: &[DocTab], settings:
     let board = board(&tab.protocol, &tab.run);
     // The nearest cuts for the cut in focus, listed once per change.
     let near = focused_cut(tab, &board).and_then(|cut| tab.nearest(cut).cloned().map(|n| (cut, n)));
+    // The enzymes that can go on the tails of the PCR in focus, listed once per change.
+    let tails = focused_copy(tab, &board).and_then(|copy| tab.tails(copy).map(|t| (copy, t.to_vec())));
     if panel {
         let width = ui.available_width();
         egui::Panel::right(("protocol-panel", tab.id))
@@ -1299,7 +1559,7 @@ pub fn show(ui: &mut egui::Ui, tab: &mut ProtocolTab, docs: &[DocTab], settings:
             .default_size((width * 0.34).clamp(300.0, 420.0))
             .min_size(260.0)
             .frame(egui::Frame::new().fill(palette.panel).inner_margin(egui::Margin::symmetric(14, 10)))
-            .show(ui, |ui| step_panel(ui, tab, &board, docs, near.as_ref(), &palette, &mut edits));
+            .show(ui, |ui| step_panel(ui, tab, &board, docs, near.as_ref(), tails.as_ref(), &palette, &mut edits));
     }
 
     // The bench and the detailed view share the rest. While a zoom runs, the bench fades and the
@@ -1322,7 +1582,10 @@ pub fn show(ui: &mut egui::Ui, tab: &mut ProtocolTab, docs: &[DocTab], settings:
     if t > 0.0
         && let Some(card) = zoomed
     {
-        let picture_rect = detail_picture_rect(area);
+        // The sequence pane under the picture, when the view shows one, takes its share of the
+        // area. The pane's document leaves the tab while the view is drawn.
+        let mut preview = tab.preview.take();
+        let picture_rect = picture_rect(tab, &board, card, area);
         // Partway, the card grows from its place on the bench to fill the view, carrying its ring
         // to where the detailed drawing will put it. The detailed view fades in over the last
         // stretch, and the ring fades out under it.
@@ -1351,19 +1614,24 @@ pub fn show(ui: &mut egui::Ui, tab: &mut ProtocolTab, docs: &[DocTab], settings:
         }
         let mut detail_ui = ui.new_child(UiBuilder::new().max_rect(area).id_salt(("protocol-detail", tab.id)));
         detail_ui.multiply_opacity(smoothstep(0.55, 1.0, t));
-        detail(&mut detail_ui, tab, &board, card, near.as_ref(), settings, &palette, &mut edits, t == 1.0);
+        detail(&mut detail_ui, tab, &board, card, near.as_ref(), settings, &palette, &mut edits, t == 1.0, &mut preview);
+        tab.preview = preview;
     }
     if !rings.is_empty() {
         tab.rings = rings;
     }
 
-    // Escape zooms out; the arrows walk through the steps, and a zoom follows them.
+    // Escape zooms out; the arrows walk through the steps, and a zoom follows them. The sequence
+    // pane keeps the arrows while it has the keyboard.
+    let sequence_focused = tab.preview.as_ref().is_some_and(|p| ui.ctx().memory(|m| m.has_focus(egui::Id::unique(("seq-view", p.tab.id)))));
     if keys && !ui.ctx().text_edit_focused() && !tab.protocol.steps.is_empty() {
         let (up, down, escape) = ui.input(|i| (i.key_pressed(Key::ArrowUp), i.key_pressed(Key::ArrowDown), i.key_pressed(Key::Escape)));
         if escape && tab.zoom.is_some() {
             edits.push(Edit::Zoom(None));
         }
-        let next = if up && tab.selected > 0 {
+        let next = if sequence_focused {
+            None
+        } else if up && tab.selected > 0 {
             Some(tab.selected - 1)
         } else if down && tab.selected + 1 < tab.protocol.steps.len() {
             Some(tab.selected + 1)
@@ -1507,7 +1775,11 @@ fn short_problem(issue: &protocol::Issue) -> String {
         "ends.incompatible" => "The ends do not pair".into(),
         "ends.no_phosphate" => "No 5' phosphate at a join".into(),
         "digest.no_cut" => "The enzymes do not cut it".into(),
-        "digest.unknown_enzyme" => "An enzyme is unknown".into(),
+        "digest.unknown_enzyme" | "amplify.unknown_enzyme" => "An enzyme is unknown".into(),
+        "amplify.no_part" => "The part is not on the map".into(),
+        "amplify.no_primers" => "No primers fit the part".into(),
+        "amplify.no_product" => "The primers make no product".into(),
+        "amplify.stale" => "The primers no longer fit the part".into(),
         "pick.no_match" => "No piece fits".into(),
         "pick.stale" => "The piece kept changed".into(),
         "open.unreadable" | "open.nothing" => "The map cannot be read".into(),
@@ -1551,6 +1823,27 @@ fn card_text(tab: &ProtocolTab, board: &Board, card: usize, palette: &Palette) -
                 _ => ("waits for the step above".into(), palette.faint),
             };
             ("CUT".into(), enzymes, line, color)
+        }
+        Kind::Copy => {
+            let Some(Action::Amplify(params)) = c.step.map(|s| &tab.protocol.steps[s].action) else { return Default::default() };
+            let object = match params.region.as_deref() {
+                Some(part) => format!("{part} by PCR"),
+                None => "by PCR".to_string(),
+            };
+            let tails = params.enzymes();
+            let (line, color) = match status {
+                Some(Status::NeedsChoice) => ("Mark the part to copy".into(), palette.warn),
+                Some(Status::Done) => {
+                    let size = result.and_then(|r| r.outputs.first()).map(|p| format!("{} bp product", thousands(p.doc.len()))).unwrap_or_default();
+                    match tails.as_slice() {
+                        [] => (format!("{size} · choose the tail enzymes"), palette.warn),
+                        list => (format!("{size} · {} tails", list.join(" + ")), palette.muted),
+                    }
+                }
+                Some(Status::Failed) => (problem(), palette.error),
+                _ => ("waits for the step above".into(), palette.faint),
+            };
+            ("COPY".into(), object, line, color)
         }
         Kind::Join => {
             // The other plasmids of the tube are counted, as the card may not have room for all.
@@ -1684,6 +1977,7 @@ fn card_menu(ui: &mut egui::Ui, tab: &ProtocolTab, board: &Board, card: usize, d
                 edits.push(Edit::OpenDocument(Box::new(made.doc.clone())));
                 ui.close();
             }
+            lane_switch(ui, tab, board, card, edits);
             ui.separator();
             if ui.button("Take this plasmid out of the protocol").clicked() {
                 edits.push(Edit::RemoveSource(step));
@@ -1696,11 +1990,18 @@ fn card_menu(ui: &mut egui::Ui, tab: &ProtocolTab, board: &Board, card: usize, d
                 edits.push(Edit::Zoom(Some(step)));
                 ui.close();
             }
-            // The enzymes are chosen on the map of the plasmid the cut comes from.
+            // The enzymes are chosen on the map of the plasmid the cut comes from, or for the cut
+            // that trims a PCR's tails, on the PCR step.
             if let Some(plasmid) = board.plasmid_before(card).and_then(|p| board.cards[p].step)
                 && ui.button("Choose the enzymes on its map").clicked()
             {
                 edits.push(Edit::Zoom(Some(plasmid)));
+                ui.close();
+            }
+            if let Some(copy) = board.before(card).filter(|&b| board.cards[b].kind == Kind::Copy).and_then(|b| board.cards[b].step)
+                && ui.button("Choose the tail enzymes on the PCR step").clicked()
+            {
+                edits.push(Edit::Zoom(Some(copy)));
                 ui.close();
             }
             if matches!(&tab.protocol.steps[step].action, Action::Digest(d) if !d.enzymes.is_empty()) && ui.button("Clear the enzymes").clicked() {
@@ -1724,6 +2025,37 @@ fn card_menu(ui: &mut egui::Ui, tab: &ProtocolTab, board: &Board, card: usize, d
                     });
                 }
             }
+            lane_switch(ui, tab, board, card, edits);
+        }
+        Kind::Copy => {
+            if ui.button("Zoom into the map").on_hover_text("The map the part is copied from, with the primers drawn on it").clicked() {
+                edits.push(Edit::Zoom(Some(step)));
+                ui.close();
+            }
+            let (pinned, tails) = match &tab.protocol.steps[step].action {
+                Action::Amplify(a) => (a.pinned(), !a.enzymes().is_empty()),
+                _ => (false, false),
+            };
+            let designed = tab.run.steps.get(step).is_some_and(|r| !r.findings.primer_pairs.is_empty());
+            if designed && ui.button("Keep these primers").on_hover_text("Write the primers into the protocol, so they stay as they are").clicked() {
+                edits.push(Edit::Primers(step, PrimerEdit::Pair(0)));
+                ui.close();
+            }
+            if pinned && ui.button("Design the primers anew").clicked() {
+                edits.push(Edit::Primers(step, PrimerEdit::Clear));
+                ui.close();
+            }
+            if tails && ui.button("Clear the tail enzymes").clicked() {
+                edits.push(Edit::SetEnzymes(step, Vec::new()));
+                ui.close();
+            }
+            if let Some(made) = tab.run.steps.get(step).and_then(|r| r.outputs.first())
+                && ui.button("Open the PCR product as a tab").clicked()
+            {
+                edits.push(Edit::OpenDocument(Box::new(made.doc.clone())));
+                ui.close();
+            }
+            lane_switch(ui, tab, board, card, edits);
         }
         Kind::Join => {
             if ui.button("Zoom into the new plasmid").clicked() {
@@ -1780,6 +2112,45 @@ fn card_menu(ui: &mut egui::Ui, tab: &ProtocolTab, board: &Board, card: usize, d
             }
         }
         Kind::Start | Kind::PutInto | Kind::AddPlasmid => {}
+    }
+}
+
+/// The menu items that switch a lane between cutting its part out and copying it by PCR, on the
+/// plasmid, PCR or cut card of the lane. A vector's cut takes a part out for the insert, so its
+/// lane offers neither.
+fn lane_switch(ui: &mut egui::Ui, tab: &ProtocolTab, board: &Board, card: usize, edits: &mut Vec<Edit>) {
+    let Some(step) = board.cards[card].step else { return };
+    let id = tab.protocol.steps[step].id.as_str();
+    // The lane's cut, from whichever of its cards the menu is on.
+    let cut: Option<String> = match board.cards[card].kind {
+        Kind::Plasmid => board.part_step_after(card).and_then(|s| match &tab.protocol.steps[s].action {
+            Action::Digest(_) => Some(tab.protocol.steps[s].id.clone()),
+            Action::Amplify(_) => tab.protocol.digest_after(&tab.protocol.steps[s].id).map(str::to_string),
+            _ => None,
+        }),
+        Kind::Copy => tab.protocol.digest_after(id).map(str::to_string),
+        Kind::Cut => Some(id.to_string()),
+        _ => None,
+    };
+    let Some(cut) = cut else { return };
+    ui.separator();
+    if tab.protocol.amplify_before(&cut).is_some() {
+        if ui
+            .button("Cut the part out instead of copying it")
+            .on_hover_text("Take the PCR out: the enzymes then cut the part straight out of the map")
+            .clicked()
+        {
+            edits.push(Edit::CutOut(step));
+            ui.close();
+        }
+    } else if protocol::part_role(&tab.protocol, &cut) != Some(PartRole::Replace)
+        && ui
+            .button("Copy the part out by PCR instead")
+            .on_hover_text("Copy the part with primers that carry the enzyme sites on their tails, then cut the tails off")
+            .clicked()
+    {
+        edits.push(Edit::CopyOut(step));
+        ui.close();
     }
 }
 
@@ -1862,8 +2233,9 @@ fn draw_card(
             // What the empty place waits for, or why its step failed, inside it.
             let waiting = match (c.kind, status) {
                 (Kind::Cut, Some(Status::NeedsChoice)) => "click to choose\nwhere to cut",
-                (Kind::Join | Kind::Cut, Some(Status::Failed)) => "see the panel\nfor why",
-                (Kind::Join | Kind::Cut, _) => "waits for\nthe steps above",
+                (Kind::Copy, Some(Status::NeedsChoice)) => "click to mark\nthe part to copy",
+                (Kind::Join | Kind::Cut | Kind::Copy, Some(Status::Failed)) => "see the panel\nfor why",
+                (Kind::Join | Kind::Cut | Kind::Copy, _) => "waits for\nthe steps above",
                 _ => "",
             };
             // Each line sits centred, the block in the middle of the circle.
@@ -1923,11 +2295,11 @@ fn draw_card(
         edits.push(edit);
     }
     // A cut without pieces yet has nothing to show but its plasmid's map, so a click on it zooms
-    // into that map, where the part and the cuts are chosen. The map stays put while the cuts
-    // are clicked one by one.
+    // into the card before it (the plasmid, or the PCR whose product it trims), where the part
+    // and the cuts are chosen. The map stays put while the cuts are clicked one by one.
     if response.clicked() {
         let unpieced = c.kind == Kind::Cut && status.is_some_and(|_| tab.run.steps[step].outputs.is_empty());
-        let target = if unpieced { board.plasmid_before(card).and_then(|p| board.cards[p].step).unwrap_or(step) } else { step };
+        let target = if unpieced { board.before(card).and_then(|p| board.cards[p].step).unwrap_or(step) } else { step };
         edits.push(Edit::Zoom(Some(target)));
     }
     // Over the kept piece the cursor offers to grab it; elsewhere it offers to zoom.
@@ -1947,7 +2319,13 @@ fn draw_card(
             format!("The same tube also makes {}. Click to zoom in and compare.", words.unwrap_or_default())
         }
         (Kind::Join, _, Some(Made::Option(ii))) => format!("Option {}: the insert fits either way round. Click to zoom in and choose.", ii + 1),
+        (Kind::Plasmid, _, _) if board.copy_after(card).is_some() => {
+            "Click to zoom into the map: mark the part to copy there, and choose the enzymes for the primers' tails in the panel.".into()
+        }
         (Kind::Plasmid, _, _) => "Click to zoom into the map: mark the part there, and click the cuts.".into(),
+        (Kind::Copy, _, _) => {
+            "Click to zoom into the map, where the primers are drawn: mark the part to copy there, and choose the tail enzymes in the panel.".into()
+        }
         (Kind::Cut, false, _) if status == Some(Status::NeedsChoice) => "Click to zoom into the plasmid's map: mark the part there, and click the cuts.".into(),
         (Kind::Cut, true, _) => "Click to zoom into the pieces. Drag the green piece onto another plasmid, or onto the new plasmid, to put it in.".into(),
         (Kind::Cut, false, _) => "Click to zoom into the pieces.".into(),
@@ -2148,15 +2526,32 @@ fn draw_link(
     // right-click leaves it out.
     enum Pill {
         Cut(usize),
+        Copy(usize),
         Treatment(usize),
     }
     let mut pills: Vec<(String, Color32, Pill)> = Vec::new();
     if board.cards[link.to].kind == Kind::Cut
         && let Some(Action::Digest(params)) = board.cards[link.to].step.map(|s| &tab.protocol.steps[s].action)
-        && let Some(plasmid) = board.cards[link.from].step
+        && let Some(from) = board.cards[link.from].step
     {
-        let text = if params.enzymes.is_empty() { "cut: choose enzymes".to_string() } else { format!("cut with {}", params.enzymes.join(" + ")) };
-        pills.push((text, if params.enzymes.is_empty() { palette.warn } else { palette.ink }, Pill::Cut(plasmid)));
+        // The cut after a PCR trims the tails, and its enzymes are chosen on the PCR step.
+        let trims = board.cards[link.from].kind == Kind::Copy;
+        let text = match (params.enzymes.is_empty(), trims) {
+            (true, true) => "trim the tails: choose enzymes".to_string(),
+            (true, false) => "cut: choose enzymes".to_string(),
+            (false, true) => format!("trim the tails with {}", params.enzymes.join(" + ")),
+            (false, false) => format!("cut with {}", params.enzymes.join(" + ")),
+        };
+        let color = if params.enzymes.is_empty() { palette.warn } else { palette.ink };
+        pills.push((text, color, if trims { Pill::Copy(from) } else { Pill::Cut(from) }));
+    }
+    if board.cards[link.to].kind == Kind::Copy
+        && let Some(copy) = board.cards[link.to].step
+        && let Action::Amplify(params) = &tab.protocol.steps[copy].action
+    {
+        let tails = params.enzymes();
+        let text = if tails.is_empty() { "PCR: choose the tail enzymes".to_string() } else { format!("PCR with {} tails", tails.join(" + ")) };
+        pills.push((text, if tails.is_empty() { palette.warn } else { palette.ink }, Pill::Copy(copy)));
     }
     for &step in &link.treatments {
         let text = match tab.protocol.steps[step].action {
@@ -2189,6 +2584,12 @@ fn draw_link(
                 }
                 response.on_hover_text("Click to choose the enzymes on the plasmid's map");
             }
+            Pill::Copy(copy) => {
+                if response.clicked() {
+                    edits.push(Edit::Zoom(Some(*copy)));
+                }
+                response.on_hover_text("Click to see the primers on the map and choose the enzymes for their tails");
+            }
             Pill::Treatment(step) => {
                 if response.clicked() {
                     edits.push(Edit::Select(*step));
@@ -2206,7 +2607,220 @@ fn draw_link(
     }
 }
 
-/// The detailed view of a card: a way back, the step's headline, a hint, and the large picture.
+/// The molecule a zoomed card's sequence pane shows: a plasmid with the part marked on it, a cut
+/// molecule with the piece kept, or a join's product with the insert.
+struct PreviewTarget<'a> {
+    /// The step whose molecule it is.
+    step: usize,
+    doc: &'a Document,
+    /// The stretch highlighted: the part, the piece kept, or the insert.
+    highlight: Option<Span>,
+    /// The cut or PCR whose part a stretch selected in the pane becomes, when there is one.
+    setting: Option<usize>,
+}
+
+/// The sequence shown under a zoomed card: a read-only document of the molecule, kept from frame
+/// to frame so it scrolls and selects like any sequence view.
+struct Preview {
+    /// The step whose molecule it shows.
+    step: usize,
+    tab: DocTab,
+    /// The highlight the picture showed when the selection was last set from it.
+    shown: Option<Span>,
+    /// A part set from the pane that the run has not taken up yet: the highlight as it was, and
+    /// when the part was set. The selection is not pulled back to the old part meanwhile.
+    pending: Option<(Option<Span>, Instant)>,
+}
+
+/// How long a part set from the sequence pane is waited for before the picture leads again.
+const PENDING_FOR: Duration = Duration::from_secs(1);
+
+/// What the sequence pane of card `card`, zoomed into, shows, or `None` for a card without a
+/// molecule to show.
+fn preview_target<'a>(tab: &'a ProtocolTab, board: &Board, card: usize) -> Option<PreviewTarget<'a>> {
+    let c = &board.cards[card];
+    match c.kind {
+        Kind::Plasmid | Kind::Copy => {
+            let (map_step, setting) = map_of(board, card)?;
+            let doc = &tab.run.steps.get(map_step)?.outputs.first()?.doc;
+            let highlight = setting.and_then(|s| tab.run.steps.get(s)).and_then(|r| r.findings.region);
+            Some(PreviewTarget { step: map_step, doc, highlight, setting })
+        }
+        // A cut without pieces yet shows the map of the card before it, and so does its pane.
+        Kind::Cut if tab.run.steps.get(c.step?).is_none_or(|r| r.outputs.is_empty()) => preview_target(tab, board, board.before(card)?),
+        Kind::Cut => {
+            let step = c.step?;
+            let doc = &tab.run.steps.get(step)?.inputs.first()?.doc;
+            let view = cut_view(tab, c)?;
+            let highlight = view.pieces.iter().find(|p| p.1 == Role::Kept).map(|p| p.0).or(view.region);
+            Some(PreviewTarget { step, doc, highlight, setting: None })
+        }
+        Kind::Join => {
+            let step = c.step?;
+            let result = tab.run.steps.get(step).filter(|r| r.status == Status::Done)?;
+            let doc = &result.outputs.first()?.doc;
+            let highlight = result.findings.parts.last().copied().filter(|_| result.findings.parts.len() > 1);
+            Some(PreviewTarget { step, doc, highlight, setting: None })
+        }
+        _ => None,
+    }
+}
+
+/// The gap between a zoomed card's picture and the sequence pane under it, which holds the
+/// handle that moves the split.
+const SPLIT_GAP: f32 = 10.0;
+
+/// A zoomed card's area under its header, as the picture and, when the view shows the molecule's
+/// bases, the sequence pane under it, which takes `sequence` of the height.
+fn detail_rects(area: Rect, sequence: Option<f32>) -> (Rect, Option<Rect>) {
+    let top = area.min.y + DETAIL_HEADER;
+    let Some(share) = sequence else { return (detail_picture_rect(area), None) };
+    let split = (area.max.y - (area.max.y - top) * share).round();
+    let picture = Rect::from_min_max(pos2(area.min.x + 12.0, top), pos2(area.max.x - 12.0, split - SPLIT_GAP));
+    (picture, Some(Rect::from_min_max(pos2(area.min.x, split), area.max)))
+}
+
+/// The share of a zoomed card's height that the sequence pane takes, when the view shows one.
+fn sequence_share(tab: &ProtocolTab, board: &Board, card: usize) -> Option<f32> {
+    (tab.show_sequence && preview_target(tab, board, card).is_some()).then_some(tab.sequence_share)
+}
+
+/// Where the picture of card `card`, zoomed into, is drawn within `area`.
+fn picture_rect(tab: &ProtocolTab, board: &Board, card: usize, area: Rect) -> Rect {
+    detail_rects(area, sequence_share(tab, board, card)).0
+}
+
+/// The stretch being dragged across the map of card `card` (or of the card before a cut) while
+/// the button is held, as [`marking_map`] keeps it.
+fn map_drag_span(ui: &egui::Ui, tab: &ProtocolTab, board: &Board, card: usize) -> Option<Span> {
+    let card = if board.cards[card].kind == Kind::Cut { board.before(card)? } else { card };
+    let (step, _) = map_of(board, card)?;
+    let marking: Option<(usize, usize)> = ui.data(|d| d.get_temp(egui::Id::unique(("protocol-map-drag", tab.id, step))));
+    let doc = &tab.run.steps.get(step)?.outputs.first()?.doc;
+    marking.and_then(|(a, b)| map_view::drag_span(a, b, doc.len(), doc.is_circular()))
+}
+
+/// The sequence under a zoomed card's picture: a read-only document of the molecule with the
+/// highlight as its selection. The selection follows the picture (the part as it is, or the
+/// stretch being dragged across the map, `map_live`) and leads it: a stretch selected here shows
+/// on the picture, and once the button is up it becomes the part when the picture sets one.
+/// Returns the selection made here while it differs from the picture's highlight.
+#[allow(clippy::too_many_arguments)]
+fn sequence_pane(
+    ui: &mut egui::Ui,
+    tab: &ProtocolTab,
+    preview: &mut Option<Preview>,
+    target: &PreviewTarget,
+    pane: Rect,
+    map_live: Option<Span>,
+    settings: &ViewSettings,
+    palette: &Palette,
+    edits: &mut Vec<Edit>,
+    interactive: bool,
+) -> Option<Span> {
+    // The document shown: made for the molecule, and read again when the molecule changes. It
+    // keeps its identity across changes, so its scroll position stays.
+    if preview.as_ref().is_none_or(|p| p.step != target.step) {
+        let mut doc_tab = DocTab::new(target.doc.clone(), None);
+        doc_tab.read_only = true;
+        *preview = Some(Preview { step: target.step, tab: doc_tab, shown: None, pending: None });
+    }
+    let preview = preview.as_mut()?;
+    if preview.tab.doc != *target.doc {
+        preview.tab.doc = target.doc.clone();
+        preview.tab.revision += 1;
+        preview.tab.select(None);
+        preview.shown = None;
+    }
+    if preview.tab.enzyme_set != tab.set {
+        preview.tab.enzyme_set = tab.set.clone();
+    }
+    // What the picture highlights moves the selection here when it changed. A part just set from
+    // here is waited for, so the old part does not pull the selection back meanwhile.
+    if let Some((old, since)) = preview.pending
+        && (target.highlight != old || since.elapsed() > PENDING_FOR)
+    {
+        preview.pending = None;
+    }
+    let wanted = map_live.or(target.highlight);
+    if preview.pending.is_none() && wanted != preview.shown {
+        preview.tab.select(wanted);
+        if let Some(span) = wanted {
+            preview.tab.scroll_to = Some(span.start);
+        }
+        preview.shown = wanted;
+    }
+    // The pane: a line that says what it shows, then the sequence view.
+    ui.painter().line_segment([pane.left_top(), pane.right_top()], Stroke::new(1.0, palette.line));
+    let inner = Rect::from_min_max(pane.min + vec2(0.0, 1.0), pane.max);
+    let mut child = ui.new_child(UiBuilder::new().max_rect(inner).id_salt(("protocol-sequence", tab.id)));
+    child.add_enabled_ui(interactive, |ui| {
+        ui.horizontal(|ui| {
+            ui.add_space(12.0);
+            ui.label(RichText::new(format!("{} · {} bp", target.doc.name, thousands(target.doc.len()))).font(style::bold_font(12.5)).color(palette.ink));
+            let what = match target.setting {
+                Some(_) => "Drag across the bases to mark the part. The map follows, and the map's marks show here.",
+                None => "The bases of what the picture shows, with the same stretch highlighted. A selection here shows on the picture too.",
+            };
+            ui.label(RichText::new(what).small().color(palette.muted));
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.small_button("Hide").on_hover_text("Hide the bases. The Sequence button above brings them back.").clicked() {
+                    edits.push(Edit::ShowSequence(false));
+                }
+            });
+        });
+        seq_view::show(ui, &mut preview.tab, settings);
+    });
+    // A selection made here: while the button is held it shows on the picture, and once it is let
+    // go it becomes the part when the picture sets one. A feature chosen by its bar goes by its
+    // name, as a click on the map's feature does.
+    let selected = preview.tab.selection;
+    if selected == preview.shown {
+        return None;
+    }
+    let pointer_down = ui.input(|i| i.pointer.primary_down());
+    match (selected, target.setting) {
+        (Some(span), Some(setting)) if !pointer_down && interactive => {
+            let len = target.doc.len();
+            let named = preview
+                .tab
+                .selected_feature
+                .and_then(|uid| target.doc.features.iter().find(|f| f.uid == uid))
+                .filter(|f| !f.name.is_empty() && target.doc.features_named(&f.name).count() == 1 && f.span(len).normalize(len) == span.normalize(len))
+                .map(|f| f.name.clone());
+            edits.push(Edit::SetPart(setting, Some(named.unwrap_or_else(|| span.format(len)))));
+            preview.pending = Some((preview.shown, Instant::now()));
+            preview.shown = Some(span);
+            Some(span)
+        }
+        (Some(span), _) => Some(span),
+        // A click cleared the selection. The highlight comes back, as there is nothing to mark.
+        (None, _) => {
+            preview.tab.select(preview.shown);
+            None
+        }
+    }
+}
+
+/// The handle between a zoomed card's picture and its sequence pane: dragging it moves the split.
+fn split_handle(ui: &mut egui::Ui, tab: &ProtocolTab, area: Rect, pane: Rect, palette: &Palette, edits: &mut Vec<Edit>, interactive: bool) {
+    let handle = Rect::from_min_max(pos2(area.min.x, pane.min.y - SPLIT_GAP), pos2(area.max.x, pane.min.y));
+    ui.painter().rect_filled(Rect::from_center_size(handle.center(), vec2(40.0, 3.0)), CornerRadius::same(2), palette.line);
+    if !interactive {
+        return;
+    }
+    let response = ui.interact(handle, egui::Id::unique(("protocol-split", tab.id)), Sense::drag());
+    if response.hovered() || response.dragged() {
+        ui.ctx().set_cursor_icon(CursorIcon::ResizeVertical);
+    }
+    if response.dragged() {
+        let room = (area.height() - DETAIL_HEADER).max(1.0);
+        edits.push(Edit::SequenceShare(tab.sequence_share - response.drag_delta().y / room));
+    }
+}
+
+/// The detailed view of a card: a way back, the step's headline, a hint, the large picture, and
+/// the molecule's bases under it.
 #[allow(clippy::too_many_arguments)]
 fn detail(
     ui: &mut egui::Ui,
@@ -2218,14 +2832,16 @@ fn detail(
     palette: &Palette,
     edits: &mut Vec<Edit>,
     interactive: bool,
+    preview: &mut Option<Preview>,
 ) {
     let area = ui.max_rect();
     ui.painter().rect_filled(area, 0.0, palette.canvas);
     let c = &board.cards[card];
     let Some(step) = c.step else { return };
-    // A plasmid's map is where its cut is chosen, so the map's heading is the cut's.
+    let target = preview_target(tab, board, card);
+    // A plasmid's map is where its cut or its PCR is chosen, so the map's heading is that step's.
     let headline_step = match c.kind {
-        Kind::Plasmid => board.cut_after(card).and_then(|cc| board.cards[cc].step).unwrap_or(step),
+        Kind::Plasmid => board.part_step_after(card).unwrap_or(step),
         _ => step,
     };
     let told = protocol::story(&tab.protocol, &tab.run, headline_step);
@@ -2237,27 +2853,46 @@ fn detail(
         }
         ui.add_space(8.0);
         ui.label(RichText::new(&told.headline).font(style::bold_font(18.0)).color(palette.ink));
+        // The bases under the picture can be hidden and shown again from here.
+        if target.is_some() {
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let shown = tab.show_sequence;
+                let hint = "Show the molecule's bases under the picture, with the same stretch highlighted. A stretch selected in either shows in both.";
+                ui.add_enabled_ui(interactive, |ui| {
+                    if ui.selectable_label(shown, "Sequence").on_hover_text(hint).clicked() {
+                        edits.push(Edit::ShowSequence(!shown));
+                    }
+                });
+            });
+        }
     });
     let waits = tab.run.steps.get(step).is_some_and(|r| r.status == Status::NeedsChoice);
     // A cut without pieces yet shows the plasmid's map, so its hint is the map's. The map's hint
     // follows the work: first mark the part, then click the cuts that the map then shows.
     let unpieced = tab.run.steps.get(step).is_none_or(|r| r.outputs.is_empty());
     let map_cut = match c.kind {
-        Kind::Plasmid => board.cut_after(card).and_then(|cc| board.cards[cc].step),
-        Kind::Cut if unpieced => Some(step),
+        Kind::Plasmid => board.part_step_after(card),
+        Kind::Copy => Some(step),
+        Kind::Cut if unpieced => board.before(card).filter(|&b| board.cards[b].kind == Kind::Copy).and_then(|b| board.cards[b].step).or(Some(step)),
         _ => None,
     };
     let marked = map_cut.and_then(|s| tab.run.steps.get(s)).is_some_and(|r| r.findings.region.is_some());
-    let marking = if marked {
-        "Drag across the map to mark the part, or click a feature. Click an enzyme to cut there: the chosen cuts are bold, and a second click takes one off."
-    } else {
-        "Drag across the map to mark the part you want, or click a feature. The enzymes that cut nearest it then appear on the map."
+    let copying = map_cut.is_some_and(|s| matches!(tab.protocol.steps[s].action, Action::Amplify(_)));
+    let marking = match (copying, marked) {
+        (true, true) => {
+            "Drag across the map to mark the part to copy, or click a feature. The primers anneal at its ends and are drawn on the map. Choose the enzymes for their tails in the panel."
+        }
+        (true, false) => "Drag across the map to mark the part to copy, or click a feature. Primers are then designed for it.",
+        (false, true) => {
+            "Drag across the map to mark the part, or click a feature. Click an enzyme to cut there: the chosen cuts are bold, and a second click takes one off."
+        }
+        (false, false) => "Drag across the map to mark the part you want, or click a feature. The enzymes that cut nearest it then appear on the map.",
     };
     let others = tab.run.steps.get(step).is_some_and(|r| !r.findings.byproducts.is_empty());
     let hint = match c.kind {
         Kind::Plasmid if map_cut.is_none() => "This plasmid is not cut yet. On the bench, drag a green piece onto it to put the piece in.",
-        Kind::Plasmid => marking,
-        Kind::Cut if unpieced && board.plasmid_before(card).is_some() => marking,
+        Kind::Plasmid | Kind::Copy => marking,
+        Kind::Cut if unpieced && board.before(card).is_some() => marking,
         Kind::Cut => "Green pieces go on into the new plasmid. Red pieces are left over. Click a piece to keep it instead.",
         Kind::Join if waits && others => {
             "The insert fits either way round. The arrowheads show which way each gene reads. Choose the plasmid you want. The grey plasmids on the right form in the same tube."
@@ -2269,17 +2904,25 @@ fn detail(
     };
     top.label(RichText::new(hint).color(palette.muted));
 
-    let rect = detail_picture_rect(area);
+    // The picture, with the molecule's bases under it when the view shows them. The sequence pane
+    // is drawn first, so a stretch selected in it shows on the picture this frame.
+    let (rect, pane) = detail_rects(area, sequence_share(tab, board, card));
+    let mut live: Option<Span> = None;
+    if let (Some(target), Some(pane)) = (target.as_ref(), pane) {
+        let map_live = target.setting.and_then(|_| map_drag_span(ui, tab, board, card));
+        live = sequence_pane(ui, tab, preview, target, pane, map_live, settings, palette, edits, interactive);
+        split_handle(ui, tab, area, pane, palette, edits, interactive);
+    }
     let ctx = ui.ctx().clone();
     let measure = EguiMeasure { ctx: &ctx };
     match c.kind {
-        Kind::Plasmid => marking_map(ui, tab, board, card, near, settings, palette, rect, edits, interactive, &measure),
+        Kind::Plasmid | Kind::Copy => marking_map(ui, tab, board, card, near, settings, palette, rect, edits, interactive, &measure, live),
         Kind::Cut => {
-            // Before the cut has pieces, the map of the plasmid it cuts stands in, so the part and
-            // the cuts are chosen on the map itself.
+            // Before the cut has pieces, the map of the plasmid it cuts (or that its PCR copies
+            // from) stands in, so the part and the cuts are chosen on the map itself.
             let Some(shown) = picture(tab, board, card, true, settings, palette.canvas) else {
-                match board.plasmid_before(card) {
-                    Some(plasmid) => marking_map(ui, tab, board, plasmid, near, settings, palette, rect, edits, interactive, &measure),
+                match board.before(card).filter(|&b| matches!(board.cards[b].kind, Kind::Plasmid | Kind::Copy)) {
+                    Some(plasmid) => marking_map(ui, tab, board, plasmid, near, settings, palette, rect, edits, interactive, &measure, live),
                     None => {
                         centered_note(ui, rect, "Choose an enzyme on each side of the part in the panel on the right, and the pieces appear here.", palette)
                     }
@@ -2335,14 +2978,15 @@ fn detail(
                     let Some(product) = result.outputs.first() else { return };
                     let doc = &product.doc;
                     let marks = junction_marks(&result.findings.junctions);
-                    // The insert (the last part) is outlined, so the eye finds where it went.
+                    // The insert (the last part) is outlined, so the eye finds where it went, or
+                    // the stretch selected in the sequence under the map.
                     let options = MapOptions {
                         width: rect.width(),
                         height: rect.height(),
                         theme: theme_on(settings, palette.canvas),
                         font_size: 12.0,
                         enzymes: marks,
-                        selection: result.findings.parts.last().copied().filter(|_| result.findings.parts.len() > 1),
+                        selection: live.or(result.findings.parts.last().copied().filter(|_| result.findings.parts.len() > 1)),
                         top: product_top(&result.findings.parts, doc.len()),
                         title: Some("New plasmid".into()),
                         colors: settings.colors,
@@ -2352,9 +2996,13 @@ fn detail(
                         ..MapOptions::default()
                     };
                     let scene = render_map(doc, &options, &measure);
-                    draw_scene(ui, egui::Id::unique(("protocol-detail-scene", tab.id, step)), &scene, rect, interactive, &measure, |tag| {
-                        describe_tag(doc, tag, None, &[])
+                    let clicked = draw_scene(ui, egui::Id::unique(("protocol-detail-scene", tab.id, step)), &scene, rect, interactive, &measure, |tag| {
+                        describe_tag(doc, tag, None, &[], false)
                     });
+                    // A feature clicked on the map is selected in the sequence under it.
+                    if let (Some(Tag::Feature(uid)), Some(p)) = (clicked, preview.as_mut()) {
+                        p.tab.select_feature(uid);
+                    }
                 }
                 Status::NeedsChoice => choice_rings(ui, tab, step, result, rect, settings, palette, edits, interactive),
                 _ => {
@@ -2367,9 +3015,21 @@ fn detail(
     }
 }
 
-/// The detailed map of plasmid card `card`, on which the part and the cuts of the cut after it
-/// are chosen: a drag across the map marks the part, a click on a feature makes it the part, and a
-/// click on an enzyme cuts there or takes that cut off.
+/// The plasmid step a card's detailed map shows, and the step whose part the map sets: the cut or
+/// the PCR after a plasmid, or the PCR itself.
+fn map_of(board: &Board, card: usize) -> Option<(usize, Option<usize>)> {
+    let c = &board.cards[card];
+    match c.kind {
+        Kind::Plasmid => Some((c.step?, board.part_step_after(card))),
+        Kind::Copy => Some((board.plasmid_before(card).and_then(|p| board.cards[p].step)?, c.step)),
+        _ => None,
+    }
+}
+
+/// The detailed map of plasmid card `card` (or of the plasmid a PCR card copies from), on which
+/// the part of the cut or the PCR after it is chosen: a drag across the map marks the part, a
+/// click on a feature makes it the part, and for a cut a click on an enzyme cuts there or takes
+/// that cut off.
 #[allow(clippy::too_many_arguments)]
 fn marking_map(
     ui: &mut egui::Ui,
@@ -2383,8 +3043,9 @@ fn marking_map(
     edits: &mut Vec<Edit>,
     interactive: bool,
     measure: &EguiMeasure,
+    live: Option<Span>,
 ) {
-    let Some(step) = board.cards[card].step else { return };
+    let Some((step, _)) = map_of(board, card) else { return };
     // A drag across the map marks the part. Where it started and where the pointer is
     // now are kept from frame to frame while the button is held, and the stretch between
     // them shows as the map's selection.
@@ -2393,7 +3054,8 @@ fn marking_map(
     let Some(doc) = tab.run.steps.get(step).and_then(|r| r.outputs.first()).map(|p| &p.doc) else { return };
     let (len, circular) = (doc.len(), doc.is_circular());
     let span = marking.and_then(|(a, b)| map_view::drag_span(a, b, len, circular));
-    let Some(map) = plasmid_map(tab, board, card, near, settings, palette, rect.size(), span, measure) else { return };
+    // The stretch selected in the sequence under the map shows while nothing is dragged here.
+    let Some(map) = plasmid_map(tab, board, card, near, settings, palette, rect.size(), span.or(live), measure) else { return };
     paint(&ui.painter_at(rect), &map.scene, rect.min);
     if !interactive {
         return;
@@ -2463,8 +3125,10 @@ fn marking_map(
             Some(Action::Digest(d)) => d.enzymes.clone(),
             _ => Vec::new(),
         };
+        let copying = matches!(map.cut.map(|c| &tab.protocol.steps[c].action), Some(Action::Amplify(_)));
         let text = match &tag {
-            Some(tag) => describe_tag(doc, tag, map.listed, &chosen),
+            Some(Tag::Primer(uid)) => map.primers.iter().find(|p| p.uid == *uid).map(|p| format!("{}\n{}\n{}", p.name, p.seq, p.description)),
+            Some(tag) => describe_tag(doc, tag, map.listed, &chosen, copying),
             None => Some("Drag around the map to mark the part".to_string()),
         };
         if let Some(text) = text {
@@ -2480,11 +3144,12 @@ fn centered_note(ui: &mut egui::Ui, rect: Rect, text: &str, palette: &Palette) {
 }
 
 /// What a tag of a map stands for, for a tooltip: a feature's name, type and length, or an enzyme
-/// cut with how far it lies from the part.
-fn describe_tag(doc: &Document, tag: &Tag, listed: Option<&NearestCuts>, chosen: &[String]) -> Option<String> {
+/// cut with how far it lies from the part. `copying` says the map's part is copied by PCR.
+fn describe_tag(doc: &Document, tag: &Tag, listed: Option<&NearestCuts>, chosen: &[String], copying: bool) -> Option<String> {
     match tag {
         Tag::Feature(uid) => {
-            doc.features.iter().find(|f| f.uid == *uid).map(|f| format!("{}\n{} · {} bp\nClick to cut around it.", f.name, f.kind, thousands(f.len())))
+            let action = if copying { "Click to copy it." } else { "Click to cut around it." };
+            doc.features.iter().find(|f| f.uid == *uid).map(|f| format!("{}\n{} · {} bp\n{action}", f.name, f.kind, thousands(f.len())))
         }
         Tag::Enzyme(name, pos) => {
             let side = listed.and_then(|l| nearer_side(l, name, *pos)).map(|(before, c)| {
@@ -2543,12 +3208,15 @@ fn enzyme_side(tab: &ProtocolTab, cut: usize, listed: Option<&NearestCuts>, name
 /// A plasmid's detailed map, and what a click on it acts on.
 struct PlasmidMap<'a> {
     scene: Scene,
-    /// The cut that follows the plasmid, whose part and enzymes the map sets.
+    /// The cut or the PCR that follows the plasmid, whose part (and for a cut, enzymes) the map
+    /// sets.
     cut: Option<usize>,
     /// The enzymes listed as nearest the part, the same as the panel's.
     listed: Option<&'a NearestCuts>,
     /// The base at 12 o'clock.
     top: usize,
+    /// A PCR's primers, drawn on the map.
+    primers: Vec<Primer>,
 }
 
 /// The detailed map of plasmid card `card` at `size`: the part (or the stretch `marking` being
@@ -2566,19 +3234,27 @@ fn plasmid_map<'a>(
     marking: Option<Span>,
     measure: &EguiMeasure,
 ) -> Option<PlasmidMap<'a>> {
-    let step = board.cards[card].step?;
-    let doc = &tab.run.steps.get(step)?.outputs.first()?.doc;
-    let cut_card = board.cut_after(card);
-    let view = cut_card.and_then(|cc| cut_view(tab, &board.cards[cc]));
-    let cut = cut_card.and_then(|cc| board.cards[cc].step);
-    let listed = near.filter(|(listed_for, _)| Some(*listed_for) == cut).map(|(_, n)| n);
+    let (step, setting) = map_of(board, card)?;
+    let template = &tab.run.steps.get(step)?.outputs.first()?.doc;
+    // The cut's pieces and cuts, or the PCR's part and primers, whichever follows the plasmid.
+    let setting_card = setting.and_then(|s| board.card_of(s));
+    let view = setting_card.filter(|&cc| board.cards[cc].kind == Kind::Cut).and_then(|cc| cut_view(tab, &board.cards[cc]));
+    let copy = setting.filter(|&s| matches!(tab.protocol.steps[s].action, Action::Amplify(_)));
+    let copied = copy.and_then(|s| copy_region(tab, s));
+    let primers: Vec<Primer> = copy.and_then(|s| tab.run.steps.get(s)).map(|r| r.findings.primers.clone()).unwrap_or_default();
+    let listed = near.filter(|(listed_for, _)| Some(*listed_for) == setting).map(|(_, n)| n);
     let mut candidates: Vec<SiteMark> = Vec::new();
     for near in listed.iter().flat_map(|l| l.before.iter().chain(&l.after)) {
         if !candidates.iter().any(|m| m.pos == near.pos && m.name == near.enzyme) {
             candidates.push(SiteMark { name: near.enzyme.clone(), pos: near.pos });
         }
     }
-    let top = view.as_ref().map_or(0, |v| v.top);
+    let top = view.as_ref().map(|v| v.top).or_else(|| copied.map(|(r, len, _)| (r.start + r.len() / 2) % len)).unwrap_or(0);
+    // A PCR's primers are drawn in place of the map's own.
+    let mut doc = template.clone();
+    if !primers.is_empty() {
+        doc.primers = primers.clone();
+    }
     let options = MapOptions {
         width: size.x,
         height: size.y,
@@ -2586,15 +3262,15 @@ fn plasmid_map<'a>(
         font_size: 12.0,
         enzymes: candidates,
         chosen_enzymes: view.as_ref().map(|v| v.cuts.clone()).unwrap_or_default(),
-        selection: marking.or(view.as_ref().and_then(|v| v.region)),
+        selection: marking.or(view.as_ref().and_then(|v| v.region)).or(copied.map(|(r, _, _)| r)),
         top,
         colors: settings.colors,
-        show_primers: false,
+        show_primers: !primers.is_empty(),
         max_feature_labels: 40,
         max_labels_per_side: 26,
         ..MapOptions::default()
     };
-    Some(PlasmidMap { scene: render_map(doc, &options, measure), cut, listed, top })
+    Some(PlasmidMap { scene: render_map(&doc, &options, measure), cut: setting, listed, top, primers })
 }
 
 /// Paint a scene in `rect`, name what the pointer is over, and return the tag clicked.
@@ -2755,6 +3431,7 @@ fn step_panel(
     board: &Board,
     docs: &[DocTab],
     near: Option<&(usize, NearestCuts)>,
+    tails: Option<&(usize, Vec<TailChoice>)>,
     palette: &Palette,
     edits: &mut Vec<Edit>,
 ) {
@@ -2799,13 +3476,18 @@ fn step_panel(
         match &step.action {
             Action::Open(params) => {
                 source_section(ui, tab, index, params, docs, palette, edits);
-                // A map's cut is chosen while looking at the map, so its choices follow here.
-                if let Some(cut) = focused_cut(tab, board) {
+                // A map's cut or PCR is chosen while looking at the map, so its choices follow here.
+                if let Some(copy) = focused_copy(tab, board) {
+                    ui.separator();
+                    copy_section(ui, tab, copy, tails, docs, palette, edits);
+                } else if let Some(cut) = focused_cut(tab, board) {
                     ui.separator();
                     cut_section(ui, tab, board, cut, listed_for(cut), docs, palette, edits);
                 }
             }
+            Action::Digest(_) if tab.protocol.amplify_before(&step.id).is_some() => trim_section(ui, tab, board, index, palette, edits),
             Action::Digest(_) => cut_section(ui, tab, board, index, listed_for(index), docs, palette, edits),
+            Action::Amplify(_) => copy_section(ui, tab, index, tails, docs, palette, edits),
             Action::Pick(_) => pieces_section(ui, tab, board, index, palette, edits),
             Action::Dephosphorylate(_) | Action::Flip(_) => {
                 if ui.button("Leave this step out").on_hover_text("Take the step out and pass its input straight on").clicked() {
@@ -2972,35 +3654,8 @@ fn cut_section(
     let role = protocol::part_role(&tab.protocol, &tab.protocol.steps[cut].id);
 
     // The part: a feature, a range, or the selection on the open map.
-    section_title(ui, if role == Some(PartRole::Replace) { "The part the insert replaces" } else { "The part to cut out" }, palette);
-    if let Some(parent) = parent {
-        let mut names: Vec<String> = parent.doc.features.iter().map(|f| f.name.clone()).filter(|n| !n.is_empty()).collect();
-        names.sort_by_key(|n| n.to_ascii_lowercase());
-        names.dedup();
-        let shown = part.clone().unwrap_or_else(|| "choose a feature…".into());
-        egui::ComboBox::from_id_salt(("protocol-part", tab.id, cut)).selected_text(shown).width(ui.available_width() - 8.0).show_ui(ui, |ui| {
-            for name in names {
-                if ui.selectable_label(part.as_deref() == Some(name.as_str()), &name).clicked() {
-                    edits.push(Edit::SetPart(cut, Some(name)));
-                }
-            }
-        });
-        let range = part.clone().filter(|p| protocol::is_range(p)).unwrap_or_default();
-        if let Some(text) = committed_text(ui, egui::Id::unique(("protocol-part-range", tab.id, cut)), &range, "or bases, such as 1201..1950") {
-            let text = text.trim().to_string();
-            edits.push(Edit::SetPart(cut, (!text.is_empty()).then_some(text)));
-        }
-        // A selection on the open map that is not the part already can become the part.
-        if let Some(open) = open_tab_of(tab, docs, cut)
-            && let Some(selection) = open.selection
-            && result.and_then(|r| r.findings.region) != Some(selection.normalize(open.len()))
-        {
-            let range = selection.format(open.len());
-            if ui.small_button(format!("Use the selection on the map ({range})")).clicked() {
-                edits.push(Edit::SetPart(cut, Some(range)));
-            }
-        }
-    }
+    let title = if role == Some(PartRole::Replace) { "The part the insert replaces" } else { "The part to cut out" };
+    part_section(ui, tab, cut, parent, &part, result.and_then(|r| r.findings.region), title, docs, palette, edits);
 
     // The enzymes nearest the part on each side. One on each side cuts the part out.
     let partner = partner(&tab.protocol, &tab.run, cut);
@@ -3045,16 +3700,7 @@ fn cut_section(
         let enzymes: Vec<String> = text.split([',', ' ', ';', '+']).filter(|s| !s.is_empty()).map(str::to_string).collect();
         edits.push(Edit::SetEnzymes(cut, enzymes));
     }
-    ui.horizontal(|ui| {
-        ui.label(RichText::new("List enzymes from").small().color(palette.muted));
-        egui::ComboBox::from_id_salt(("protocol-set", tab.id)).selected_text(tab.set.as_str()).width(110.0).show_ui(ui, |ui| {
-            for name in ENZYME_SETS {
-                if ui.selectable_label(tab.set == *name, *name).clicked() {
-                    edits.push(Edit::Set(name.to_string()));
-                }
-            }
-        });
-    });
+    set_chooser(ui, tab, palette, edits);
     if role == Some(PartRole::Replace)
         && let Some(insert_enzymes) = insert_cut(tab, cut).and_then(|c| match &tab.protocol.steps[c].action {
             Action::Digest(d) => Some(d.enzymes.clone()),
@@ -3067,21 +3713,258 @@ fn cut_section(
         edits.push(Edit::SetEnzymes(cut, insert_enzymes));
     }
 
-    // The pieces, with the one kept, and the gel they make.
-    if let Some(result) = result.filter(|r| r.status == Status::Done) {
-        section_title(ui, "The pieces", palette);
-        if let Some(card) = board.card_of(cut) {
-            piece_rows(ui, tab, board, card, palette, edits);
+    pieces_and_gel(ui, tab, board, cut, &params.enzymes.join("+"), palette, edits);
+}
+
+/// The part a cut is about or a PCR copies, to choose: a feature of the map, a range of its
+/// bases, or the selection on the map when it is open in a tab. `setting` is the cut or the PCR,
+/// `parent` the map as the run read it, and `region` the part as the run found it.
+#[allow(clippy::too_many_arguments)]
+fn part_section(
+    ui: &mut egui::Ui,
+    tab: &ProtocolTab,
+    setting: usize,
+    parent: Option<&Piece>,
+    part: &Option<String>,
+    region: Option<Span>,
+    title: &str,
+    docs: &[DocTab],
+    palette: &Palette,
+    edits: &mut Vec<Edit>,
+) {
+    section_title(ui, title, palette);
+    let Some(parent) = parent else { return };
+    let mut names: Vec<String> = parent.doc.features.iter().map(|f| f.name.clone()).filter(|n| !n.is_empty()).collect();
+    names.sort_by_key(|n| n.to_ascii_lowercase());
+    names.dedup();
+    let shown = part.clone().unwrap_or_else(|| "choose a feature…".into());
+    egui::ComboBox::from_id_salt(("protocol-part", tab.id, setting)).selected_text(shown).width(ui.available_width() - 8.0).show_ui(ui, |ui| {
+        for name in names {
+            if ui.selectable_label(part.as_deref() == Some(name.as_str()), &name).clicked() {
+                edits.push(Edit::SetPart(setting, Some(name)));
+            }
         }
-        if let Some(input) = result.inputs.first() {
-            let gel = gel_scene(input, &result.outputs, &params.enzymes.join("+"));
-            ui.add_space(4.0);
-            let (rect, _) = ui.allocate_exact_size(vec2(gel.width, gel.height), Sense::hover());
-            ui.painter().rect_filled(rect, CornerRadius::same(4), scene_paint::color(gel.background));
-            paint(ui.painter(), &gel, rect.min);
-            ui.label(RichText::new("At the bench, run the cut DNA on a gel and cut out the band of the piece kept.").small().color(palette.muted));
+    });
+    let range = part.clone().filter(|p| protocol::is_range(p)).unwrap_or_default();
+    if let Some(text) = committed_text(ui, egui::Id::unique(("protocol-part-range", tab.id, setting)), &range, "or bases, such as 1201..1950") {
+        let text = text.trim().to_string();
+        edits.push(Edit::SetPart(setting, (!text.is_empty()).then_some(text)));
+    }
+    // A selection on the open map that is not the part already can become the part.
+    if let Some(open) = open_tab_of(tab, docs, setting)
+        && let Some(selection) = open.selection
+        && region != Some(selection.normalize(open.len()))
+    {
+        let range = selection.format(open.len());
+        if ui.small_button(format!("Use the selection on the map ({range})")).clicked() {
+            edits.push(Edit::SetPart(setting, Some(range)));
         }
     }
+}
+
+/// The enzyme set the choosers list from.
+fn set_chooser(ui: &mut egui::Ui, tab: &ProtocolTab, palette: &Palette, edits: &mut Vec<Edit>) {
+    ui.horizontal(|ui| {
+        ui.label(RichText::new("List enzymes from").small().color(palette.muted));
+        egui::ComboBox::from_id_salt(("protocol-set", tab.id)).selected_text(tab.set.as_str()).width(110.0).show_ui(ui, |ui| {
+            for name in ENZYME_SETS {
+                if ui.selectable_label(tab.set == *name, *name).clicked() {
+                    edits.push(Edit::Set(name.to_string()));
+                }
+            }
+        });
+    });
+}
+
+/// The pieces of cut `cut`, with the one kept, and the gel they make. `label` names the lane.
+fn pieces_and_gel(ui: &mut egui::Ui, tab: &ProtocolTab, board: &Board, cut: usize, label: &str, palette: &Palette, edits: &mut Vec<Edit>) {
+    let Some(result) = tab.run.steps.get(cut).filter(|r| r.status == Status::Done) else { return };
+    section_title(ui, "The pieces", palette);
+    if let Some(card) = board.card_of(cut) {
+        piece_rows(ui, tab, board, card, palette, edits);
+    }
+    if let Some(input) = result.inputs.first() {
+        let gel = gel_scene(input, &result.outputs, label);
+        ui.add_space(4.0);
+        let (rect, _) = ui.allocate_exact_size(vec2(gel.width, gel.height), Sense::hover());
+        ui.painter().rect_filled(rect, CornerRadius::same(4), scene_paint::color(gel.background));
+        paint(ui.painter(), &gel, rect.min);
+        ui.label(RichText::new("At the bench, run the cut DNA on a gel and cut out the band of the piece kept.").small().color(palette.muted));
+    }
+}
+
+/// The cut that trims a PCR product's tails. Its enzymes are the tails', chosen on the PCR step,
+/// so it shows what it does and its pieces.
+fn trim_section(ui: &mut egui::Ui, tab: &ProtocolTab, board: &Board, cut: usize, palette: &Palette, edits: &mut Vec<Edit>) {
+    let Some(Action::Digest(params)) = tab.protocol.steps.get(cut).map(|s| &s.action) else { return };
+    let copy = tab.protocol.amplify_before(&tab.protocol.steps[cut].id).and_then(|id| tab.protocol.steps.iter().position(|s| s.id == id));
+    section_title(ui, "Trimming the tails", palette);
+    let enzymes = if params.enzymes.is_empty() { "no enzymes yet".to_string() } else { protocol::and_list(&params.enzymes) };
+    ui.label(
+        RichText::new(format!("The cut trims the primers' tails with {enzymes}, so the piece gets the sticky ends the vector has. The enzymes are the tails', chosen on the PCR step."))
+            .color(palette.ink),
+    );
+    if let Some(copy) = copy
+        && ui.small_button("Choose the tail enzymes").clicked()
+    {
+        edits.push(Edit::Select(copy));
+    }
+    pieces_and_gel(ui, tab, board, cut, &params.enzymes.join("+"), palette, edits);
+}
+
+/// The enzymes of the vector's cut in the join that step `step`'s lane feeds, when the vector is
+/// cut: the enzymes an insert's tails should match.
+fn vector_cut_enzymes(tab: &ProtocolTab, step: usize) -> Option<Vec<String>> {
+    match &tab.protocol.steps[insert_cut(tab, step)?].action {
+        Action::Digest(d) => Some(d.enzymes.clone()),
+        _ => None,
+    }
+}
+
+/// A PCR's choices: the part it copies, the enzyme whose site goes on each primer's tail, the
+/// enzymes as typed, the primers with a way to keep them or use another pair, and the product.
+#[allow(clippy::too_many_arguments)]
+fn copy_section(
+    ui: &mut egui::Ui,
+    tab: &ProtocolTab,
+    copy: usize,
+    tails: Option<&(usize, Vec<TailChoice>)>,
+    docs: &[DocTab],
+    palette: &Palette,
+    edits: &mut Vec<Edit>,
+) {
+    let Some(Action::Amplify(params)) = tab.protocol.steps.get(copy).map(|s| &s.action) else { return };
+    let result = tab.run.steps.get(copy);
+    let parent = result.and_then(|r| r.inputs.first());
+    let part = params.region.clone();
+    part_section(ui, tab, copy, parent, &part, result.and_then(|r| r.findings.region), "The part to copy", docs, palette, edits);
+
+    // The enzyme sites on the primers' tails: one enzyme for each primer, from those that do not
+    // cut inside the part. The ones that open the vector once come first, as the ends must match.
+    section_title(ui, "Enzyme sites on the primers' tails", palette);
+    let listed = tails.filter(|(for_step, _)| *for_step == copy).map(|(_, t)| t.as_slice());
+    let other = other_plasmid(&tab.protocol, &tab.run, copy).map(|d| d.name);
+    match (listed, &part) {
+        (Some(listed), Some(part)) => {
+            for (forward, chosen) in [(true, &params.forward_enzyme), (false, &params.reverse_enzyme)] {
+                let (which, end) = if forward { ("Forward primer", "start") } else { ("Reverse primer", "end") };
+                ui.label(RichText::new(format!("{which}, at the {end} of {part}")).small().color(palette.muted));
+                ui.horizontal_wrapped(|ui| {
+                    for choice in listed.iter().filter(|c| !c.cuts_part) {
+                        let on = chosen.as_deref().is_some_and(|c| c.eq_ignore_ascii_case(&choice.name));
+                        if tail_chip(ui, choice, on, other.as_deref(), palette).clicked() {
+                            edits.push(Edit::PickTail(copy, forward, choice.name.clone()));
+                        }
+                    }
+                });
+            }
+            let inside: Vec<&str> = listed.iter().filter(|c| c.cuts_part).map(|c| c.name.as_str()).collect();
+            if !inside.is_empty() {
+                ui.label(RichText::new(format!("These cut inside {part}, so they are left out: {}", inside.join(", "))).small().color(palette.faint));
+            }
+        }
+        _ => {
+            ui.label(
+                RichText::new(
+                    "Mark the part first: drag across the map or click a feature on it, or choose one above. The enzymes that can go on the tails are then listed here.",
+                )
+                .color(palette.muted),
+            );
+        }
+    }
+
+    // The enzymes as typed, the set the list comes from, and the vector's enzymes.
+    section_title(ui, "Enzymes", palette);
+    if let Some(text) =
+        committed_text(ui, egui::Id::unique(("protocol-enzymes", tab.id, copy)), &params.enzymes().join(", "), "or type them, such as EcoRI, BamHI")
+    {
+        let enzymes: Vec<String> = text.split([',', ' ', ';', '+']).filter(|s| !s.is_empty()).map(str::to_string).collect();
+        edits.push(Edit::SetEnzymes(copy, enzymes));
+    }
+    set_chooser(ui, tab, palette, edits);
+    if let Some(vector_enzymes) = vector_cut_enzymes(tab, copy)
+        && !vector_enzymes.is_empty()
+        && vector_enzymes != params.enzymes()
+        && ui.small_button(format!("Use the vector's enzymes ({})", protocol::and_list(&vector_enzymes))).clicked()
+    {
+        edits.push(Edit::SetEnzymes(copy, vector_enzymes));
+    }
+
+    // The primers: each with its sequence to copy out, and the way to keep them, to take another
+    // pair or to design them anew. Then the product.
+    let Some(result) = result.filter(|r| r.status == Status::Done) else { return };
+    section_title(ui, "Primers", palette);
+    for p in &result.findings.primers {
+        ui.horizontal(|ui| {
+            ui.label(RichText::new(&p.name).font(style::bold_font(12.5)).color(palette.ink));
+            ui.label(RichText::new(&p.description).small().color(palette.muted));
+            if ui.small_button("Copy").on_hover_text("Copy the name and the sequence").clicked() {
+                ui.ctx().copy_text(format!("{}\t{}", p.name, p.seq));
+            }
+        });
+        ui.add(egui::Label::new(RichText::new(&p.seq).monospace().size(11.5).color(palette.ink)).wrap());
+    }
+    if params.pinned() {
+        ui.label(RichText::new("Kept in the protocol, so they stay as they are when the maps change.").small().color(palette.muted));
+        if ui.small_button("Design the primers anew").clicked() {
+            edits.push(Edit::Primers(copy, PrimerEdit::Clear));
+        }
+    } else {
+        ui.label(RichText::new("Designed anew on each run. Keep them before ordering them.").small().color(palette.muted));
+        if ui.small_button("Keep these primers").clicked() {
+            edits.push(Edit::Primers(copy, PrimerEdit::Pair(0)));
+        }
+        let pairs = &result.findings.primer_pairs;
+        if pairs.len() > 1 {
+            egui::CollapsingHeader::new(format!("{} other pairs", pairs.len() - 1)).id_salt(("protocol-other-pairs", tab.id, copy)).show(ui, |ui| {
+                for (ii, pair) in pairs.iter().enumerate().skip(1) {
+                    ui.horizontal_wrapped(|ui| {
+                        if ui.small_button(format!("Use pair {}", ii + 1)).clicked() {
+                            edits.push(Edit::Primers(copy, PrimerEdit::Pair(ii)));
+                        }
+                        let mut words = format!(
+                            "Tm {:.1} and {:.1} C, {} and {} nt anneal, {} bp product",
+                            pair.forward_tm,
+                            pair.reverse_tm,
+                            pair.forward_anneals,
+                            pair.reverse_anneals,
+                            thousands(pair.product_len)
+                        );
+                        if !pair.warnings.is_empty() {
+                            words.push_str(&format!(" ({})", pair.warnings.join("; ")));
+                        }
+                        ui.label(RichText::new(words).small().color(palette.muted));
+                    });
+                }
+            });
+        }
+    }
+    if let Some(product) = result.outputs.first() {
+        section_title(ui, "The product", palette);
+        ui.label(RichText::new(format!("{} bp, with the tails on its ends and no 5' phosphates.", thousands(product.doc.len()))).color(palette.ink));
+        if ui.small_button("Open the PCR product as a tab").clicked() {
+            edits.push(Edit::OpenDocument(Box::new(product.doc.clone())));
+        }
+    }
+}
+
+/// One enzyme to put on a primer's tail: its name, chosen or not, with a tick when it opens the
+/// vector once, so the ends can match. Hovering tells the rest.
+fn tail_chip(ui: &mut egui::Ui, choice: &TailChoice, chosen: bool, other: Option<&str>, palette: &Palette) -> egui::Response {
+    let mut job = egui::text::LayoutJob::default();
+    let format = |color: Color32, font: egui::FontId| egui::TextFormat { font_id: font, color, ..Default::default() };
+    job.append(&choice.name, 0.0, format(palette.ink, style::bold_font(12.5)));
+    if choice.vector_cuts == Some(1) {
+        job.append("  ✓", 0.0, format(palette.ok, style::bold_font(12.0)));
+    }
+    let mut lines = vec![format!("Puts the {} site on this primer's tail.", choice.name)];
+    if let (Some(n), Some(other)) = (choice.vector_cuts, other) {
+        lines.push(format!("Cuts {other} {n} time{}.", if n == 1 { "" } else { "s" }));
+    }
+    if choice.vector_cuts == Some(1) {
+        lines.push("It opens the vector once, so the ends can match.".into());
+    }
+    ui.selectable_label(chosen, job).on_hover_text(lines.join("\n"))
 }
 
 /// The cut of the insert that goes into the same join as cut `cut`: for a vector's cut, the
@@ -3246,6 +4129,7 @@ fn step_editor(ui: &mut egui::Ui, tab: &ProtocolTab, palette: &Palette, edits: &
     input_editor(ui, tab, index, palette, edits);
     match &step.action {
         Action::Digest(params) => digest_editor(ui, tab, index, params, palette, edits),
+        Action::Amplify(params) => amplify_editor(ui, tab, index, params, palette, edits),
         Action::Pick(params) => pick_editor(ui, tab, index, params, palette, edits),
         Action::Ligate(params) => ligate_editor(ui, index, params, edits),
         Action::Open(_) | Action::Dephosphorylate(_) | Action::Flip(_) => {}
@@ -3364,6 +4248,42 @@ fn digest_editor(ui: &mut egui::Ui, tab: &ProtocolTab, index: usize, params: &Di
     if let Some(text) = committed_text(ui, egui::Id::unique(("protocol-around", tab.id, index)), params.around.as_deref().unwrap_or(""), "EGFP, or 389..1108") {
         let text = text.trim().to_string();
         edits.push(Edit::SetPart(index, (!text.is_empty()).then_some(text)));
+    }
+}
+
+/// What a PCR copies and with what, as typed: the part, the enzyme on each primer's tail, and the
+/// primers themselves, which are designed when left empty.
+fn amplify_editor(ui: &mut egui::Ui, tab: &ProtocolTab, index: usize, params: &AmplifyParams, palette: &Palette, edits: &mut Vec<Edit>) {
+    field_label(ui, "Copy (a feature or a range)", palette);
+    if let Some(text) = committed_text(ui, egui::Id::unique(("protocol-region", tab.id, index)), params.region.as_deref().unwrap_or(""), "EGFP, or 389..1108") {
+        let text = text.trim().to_string();
+        edits.push(Edit::SetPart(index, (!text.is_empty()).then_some(text)));
+    }
+    for (forward, label, current) in
+        [(true, "Forward primer's tail enzyme", &params.forward_enzyme), (false, "Reverse primer's tail enzyme", &params.reverse_enzyme)]
+    {
+        field_label(ui, label, palette);
+        if let Some(text) = committed_text(ui, egui::Id::unique(("protocol-tail", tab.id, index, forward)), current.as_deref().unwrap_or(""), "none, or EcoRI")
+        {
+            // An empty name takes the tail off, which choosing the enzyme there again does.
+            let name = text.trim().to_string();
+            match (name.is_empty(), current) {
+                (true, Some(old)) => edits.push(Edit::PickTail(index, forward, old.clone())),
+                (true, None) => {}
+                (false, _) => edits.push(Edit::PickTail(index, forward, name)),
+            }
+        }
+    }
+    field_label(ui, "Primers, 5' to 3' with their tails (empty to design them)", palette);
+    let forward =
+        committed_text(ui, egui::Id::unique(("protocol-forward-primer", tab.id, index)), params.forward_primer.as_deref().unwrap_or(""), "forward primer");
+    let reverse =
+        committed_text(ui, egui::Id::unique(("protocol-reverse-primer", tab.id, index)), params.reverse_primer.as_deref().unwrap_or(""), "reverse primer");
+    // Each field commits on its own, and the other keeps its value.
+    if forward.is_some() || reverse.is_some() {
+        let f = forward.unwrap_or_else(|| params.forward_primer.clone().unwrap_or_default()).trim().to_string();
+        let r = reverse.unwrap_or_else(|| params.reverse_primer.clone().unwrap_or_default()).trim().to_string();
+        edits.push(Edit::Primers(index, if f.is_empty() && r.is_empty() { PrimerEdit::Clear } else { PrimerEdit::Given(f, r) }));
     }
 }
 
@@ -3522,6 +4442,23 @@ mod tests {
             insert_enzymes: enzymes.iter().map(|s| s.to_string()).collect(),
             insert: part.map(str::to_string),
             dephosphorylate: true,
+            ..CloningTemplate::default()
+        })
+    }
+
+    /// The same cloning with geneX copied out of the donor by PCR, with the enzymes' sites on
+    /// the primers' tails.
+    fn cloning_by_pcr(enzymes: &[&str], part: Option<&str>) -> Protocol {
+        let (vector, donor) = maps();
+        let stored = |doc: &Document| OpenParams { path: None, document: Some(json::document_to_value(doc, true)) };
+        Protocol::restriction_cloning(&CloningTemplate {
+            name: "geneX into vector by PCR".into(),
+            vector: Some(stored(&vector)),
+            donor: stored(&donor),
+            insert_enzymes: enzymes.iter().map(|s| s.to_string()).collect(),
+            insert: part.map(str::to_string),
+            dephosphorylate: true,
+            pcr: true,
             ..CloningTemplate::default()
         })
     }
@@ -3726,6 +4663,8 @@ mod tests {
     fn one_enzyme_with_phosphates() -> ProtocolTab {
         let mut tab = ProtocolTab::new(cloning(&["EcoRI"], Some("geneX")), None);
         tab.change(None, |p| p.leave_out("cip").unwrap());
+        // The strip beside the zoomed join is read whole, so the bases under the map stay hidden.
+        tab.show_sequence = false;
         tab.refresh(&[], false);
         tab
     }
@@ -3772,7 +4711,8 @@ mod tests {
     #[test]
     fn every_step_draws_on_the_bench_and_zoomed_in() {
         let tabs = [&["EcoRI", "BamHI"][..], &[][..]].map(|enzymes| ProtocolTab::new(cloning(enzymes, Some("geneX")), None));
-        for mut tab in tabs.into_iter().chain([one_enzyme_with_phosphates()]) {
+        let copies = [ProtocolTab::new(cloning_by_pcr(&["EcoRI", "BamHI"], Some("geneX")), None), ProtocolTab::new(cloning_by_pcr(&[], None), None)];
+        for mut tab in tabs.into_iter().chain([one_enzyme_with_phosphates()]).chain(copies) {
             tab.refresh(&[], false);
             // The bench with each step shown in the panel, then each card zoomed into.
             for ii in 0..tab.protocol.steps.len() {
@@ -3868,8 +4808,8 @@ mod tests {
         fn plasmid_map(&self, tab: &mut ProtocolTab, step: usize) -> (Scene, Rect, usize) {
             let laid = board(&tab.protocol, &tab.run);
             let near = focused_cut(tab, &laid).and_then(|cut| tab.nearest(cut).cloned().map(|n| (cut, n)));
-            let rect = detail_picture_rect(self.area);
             let card = laid.card_of(step).unwrap();
+            let rect = picture_rect(tab, &laid, card, self.area);
             let measure = EguiMeasure { ctx: &self.ctx };
             let map = plasmid_map(tab, &laid, card, near.as_ref(), &ViewSettings::default(), &Palette::get(false), rect.size(), None, &measure).unwrap();
             (map.scene, rect, map.top)
@@ -4012,7 +4952,7 @@ mod tests {
         let laid = board(&tab.protocol, &tab.run);
         let card = laid.card_of(cut).unwrap();
         let shown = picture(&tab, &laid, card, true, &ViewSettings::default(), Palette::get(false).canvas).unwrap();
-        let rect = detail_picture_rect(screen.area);
+        let rect = picture_rect(&tab, &laid, card, screen.area);
         let mut options = shown.options;
         options.width = rect.width();
         options.height = rect.height();
@@ -4069,5 +5009,169 @@ mod tests {
         // The way back is one undo.
         assert!(tab.undo());
         assert_eq!(tab.protocol.step(&join.id).unwrap().inputs, names(&["cip", "insert"]));
+    }
+
+    #[test]
+    fn a_pcr_lane_has_a_copy_card_and_a_lane_switches_between_cutting_and_copying() {
+        let mut tab = ProtocolTab::new(cloning_by_pcr(&["EcoRI", "BamHI"], Some("geneX")), None);
+        tab.refresh(&[], false);
+        for step in &tab.run.steps {
+            assert_eq!(step.status, Status::Done, "{}: {:?}", step.id, step.error);
+        }
+        // The PCR card sits between the donor and its cut, and the join one row lower than in
+        // a cut lane.
+        let laid = board(&tab.protocol, &tab.run);
+        let kinds: Vec<(Kind, f32, usize)> = laid.cards.iter().map(|c| (c.kind, c.column, c.row)).collect();
+        let expected = vec![
+            (Kind::Plasmid, 0.0, 0),
+            (Kind::Cut, 0.0, 1),
+            (Kind::Plasmid, 1.0, 0),
+            (Kind::Copy, 1.0, 1),
+            (Kind::Cut, 1.0, 2),
+            (Kind::Join, 0.5, 3),
+            (Kind::AddPlasmid, 2.0, 0),
+        ];
+        assert_eq!(kinds, expected);
+        let copy = step_index(&tab, "pcr_donor");
+        let copy_card = laid.card_of(copy).unwrap();
+        assert_eq!(
+            (laid.copy_after(2), laid.cut_after(copy_card), laid.before(4), laid.part_step_after(2)),
+            (Some(copy_card), Some(4), Some(copy_card), Some(copy))
+        );
+        // The PCR card draws the product as a bar: the copy green between grey tails. The donor's
+        // card shows the part copied, with the rest left as it is.
+        let settings = ViewSettings::default();
+        let palette = Palette::get(false);
+        let shown = picture(&tab, &laid, copy_card, false, &settings, palette.raised).unwrap();
+        assert!(!shown.doc.is_circular());
+        let pieces: Vec<(Span, Role)> = shown.options.pieces.iter().map(|p| (p.span, p.role)).collect();
+        assert_eq!(pieces, vec![(Span::new(0, 12), Role::Plain), (Span::new(12, 612), Role::Kept), (Span::new(612, 624), Role::Plain)]);
+        let plasmid = picture(&tab, &laid, 2, false, &settings, palette.raised).unwrap();
+        assert_eq!(plasmid.options.pieces.first().map(|p| (p.span, p.role)), Some((Span::new(200, 800), Role::Kept)));
+        assert!(plasmid.options.pieces.iter().skip(1).all(|p| p.role == Role::Plain));
+        let (verb, object, line, _) = card_text(&tab, &laid, copy_card, &palette);
+        assert_eq!((verb.as_str(), object.as_str(), line.as_str()), ("COPY", "geneX by PCR", "624 bp product · EcoRI + BamHI tails"));
+        // The whole bench, with the words a person reads on it.
+        let mut screen = Screen::new();
+        screen.settle(&mut tab);
+        for words in ["COPY", "geneX by PCR", "PCR with EcoRI + BamHI tails", "trim the tails with EcoRI + BamHI", "PCR product"] {
+            assert!(screen.texts.iter().any(|t| t == words), "{words} is missing from {:?}", screen.texts);
+        }
+        // Back to cutting the part out, and to copying it again, from the bench.
+        apply(&mut tab, vec![Edit::CutOut(copy)]);
+        assert!(tab.protocol.step("pcr_donor").is_none());
+        assert!(tab.notice.as_ref().is_some_and(|(n, _)| n.starts_with("The part is now cut out of donor again")), "{:?}", tab.notice);
+        tab.refresh(&[], false);
+        assert_eq!(tab.run.step("product").unwrap().status, Status::Done);
+        let donor = step_index(&tab, "donor");
+        apply(&mut tab, vec![Edit::CopyOut(donor)]);
+        assert!(tab.protocol.step("pcr_donor").is_some());
+        assert_eq!(tab.selected, step_index(&tab, "pcr_donor"), "the PCR step is shown, where the tails are chosen");
+        tab.refresh(&[], false);
+        assert_eq!(tab.run.step("product").unwrap().status, Status::Done, "{:?}", tab.run.step("product").unwrap().error);
+        // The way back is one undo each.
+        assert!(tab.undo());
+        assert!(tab.protocol.step("pcr_donor").is_none());
+    }
+
+    #[test]
+    fn tail_enzymes_are_picked_one_per_primer_and_the_primers_can_be_kept() {
+        let mut tab = ProtocolTab::new(cloning_by_pcr(&[], Some("geneX")), None);
+        tab.refresh(&[], false);
+        let copy = step_index(&tab, "pcr_donor");
+        assert_eq!(tab.run.steps[copy].status, Status::Done, "a PCR without tails still makes its product");
+        // The chooser lists the enzymes of the set that do not cut inside geneX, those that open
+        // the vector once first.
+        let listed = tab.tails(copy).unwrap().to_vec();
+        assert!(listed.iter().take(2).all(|c| c.vector_cuts == Some(1)), "{:?}", listed.iter().take(3).collect::<Vec<_>>());
+        assert!(listed.iter().any(|c| c.name == "EcoRI" && !c.cuts_part && c.vector_cuts == Some(1)), "{listed:?}");
+        // One click per primer sets its tail. The cut that trims the tails and the vector follow.
+        apply(&mut tab, vec![Edit::PickTail(copy, true, "EcoRI".into())]);
+        tab.refresh(&[], false);
+        apply(&mut tab, vec![Edit::PickTail(copy, false, "BamHI".into())]);
+        tab.refresh(&[], false);
+        assert_eq!(enzymes_of(&tab, "cut_pcr"), vec!["EcoRI".to_string(), "BamHI".to_string()]);
+        assert_eq!(enzymes_of(&tab, "cut_vector"), vec!["EcoRI".to_string(), "BamHI".to_string()]);
+        for step in &tab.run.steps {
+            assert_eq!(step.status, Status::Done, "{}: {:?}", step.id, step.error);
+        }
+        assert!(tab.notice.as_ref().is_some_and(|(n, _)| n.starts_with("The primers for donor carry EcoRI and BamHI sites")), "{:?}", tab.notice);
+        // A second click takes a tail off.
+        apply(&mut tab, vec![Edit::PickTail(copy, false, "BamHI".into())]);
+        let Action::Amplify(params) = &tab.protocol.steps[copy].action else { panic!("pcr_donor is a PCR") };
+        assert_eq!((params.forward_enzyme.as_deref(), params.reverse_enzyme.as_deref()), (Some("EcoRI"), None));
+        apply(&mut tab, vec![Edit::PickTail(copy, false, "BamHI".into())]);
+        tab.refresh(&[], false);
+        // Keeping the primers writes them into the step, and designing them anew lets them go.
+        let designed = tab.run.steps[copy].findings.primers[0].seq.clone();
+        apply(&mut tab, vec![Edit::Primers(copy, PrimerEdit::Pair(0))]);
+        let Action::Amplify(params) = &tab.protocol.steps[copy].action else { panic!("pcr_donor is a PCR") };
+        assert_eq!(params.forward_primer.as_deref(), Some(designed.as_str()));
+        apply(&mut tab, vec![Edit::Primers(copy, PrimerEdit::Clear)]);
+        let Action::Amplify(params) = &tab.protocol.steps[copy].action else { panic!("pcr_donor is a PCR") };
+        assert!(!params.pinned());
+        // Zoomed into the PCR, the view is headed by the PCR and shows the donor's map with the
+        // primers drawn on it.
+        let mut screen = Screen::new();
+        tab.selected = copy;
+        screen.settle(&mut tab);
+        tab.zoom_to(copy);
+        screen.settle(&mut tab);
+        assert!(screen.texts.iter().any(|t| t == "Copy geneX out of donor by PCR"), "{:?}", screen.texts);
+        let (scene, _, _) = screen.plasmid_map(&mut tab, copy);
+        assert!(scene.items.iter().any(|i| matches!(i.tag, Tag::Primer(_))), "the primers are drawn on the map");
+        assert!(scene.items.iter().any(|i| i.tag == Tag::Selection), "the part copied is shaded");
+    }
+
+    #[test]
+    fn the_zoomed_map_has_the_bases_under_it_and_the_two_select_together() {
+        let mut tab = ProtocolTab::new(cloning(&[], Some("geneX")), None);
+        tab.refresh(&[], false);
+        let mut screen = Screen::new();
+        let donor = step_index(&tab, "donor");
+        tab.zoom_to(donor);
+        screen.settle(&mut tab);
+        // The pane shows the donor's bases, read-only, with geneX selected as on the map.
+        let preview = tab.preview.as_ref().expect("the pane has a document");
+        assert_eq!((preview.step, preview.tab.selection, preview.tab.read_only), (donor, Some(Span::new(200, 800)), true));
+        assert!(screen.texts.iter().any(|t| t == "donor · 1,500 bp"), "{:?}", screen.texts);
+        assert!(screen.texts.iter().any(|t| t == "Sequence"), "{:?}", screen.texts);
+        // The map takes the room above the pane.
+        let laid = board(&tab.protocol, &tab.run);
+        let card = laid.card_of(donor).unwrap();
+        let (map, pane) = detail_rects(screen.area, sequence_share(&tab, &laid, card));
+        assert!(pane.is_some_and(|p| p.min.y > map.max.y && p.max.y == screen.area.max.y));
+        // A stretch selected in the pane becomes the part once the button is up, and a feature
+        // chosen by its bar goes by its name.
+        tab.preview.as_mut().unwrap().tab.select(Some(Span::new(300, 700)));
+        screen.frame(&mut tab, Vec::new());
+        screen.frame(&mut tab, Vec::new());
+        assert_eq!(part_of(&tab, "cut_donor").as_deref(), Some("301..700"));
+        assert_eq!(tab.preview.as_ref().unwrap().tab.selection, Some(Span::new(300, 700)), "the selection stays while the part catches up");
+        let gene = tab.run.steps[donor].outputs[0].doc.features[0].uid;
+        tab.preview.as_mut().unwrap().tab.select_feature(gene);
+        screen.frame(&mut tab, Vec::new());
+        screen.frame(&mut tab, Vec::new());
+        assert_eq!(part_of(&tab, "cut_donor").as_deref(), Some("geneX"));
+        // A click that cleared the selection brings the part's highlight back.
+        tab.preview.as_mut().unwrap().tab.select(None);
+        screen.frame(&mut tab, Vec::new());
+        assert_eq!(tab.preview.as_ref().unwrap().tab.selection, Some(Span::new(200, 800)));
+        // Hidden, the pane leaves the whole area to the map, and the button brings it back.
+        apply(&mut tab, vec![Edit::ShowSequence(false)]);
+        screen.settle(&mut tab);
+        assert!(!screen.texts.iter().any(|t| t == "donor · 1,500 bp"), "{:?}", screen.texts);
+        assert_eq!(picture_rect(&tab, &laid, card, screen.area), detail_picture_rect(screen.area));
+        apply(&mut tab, vec![Edit::ShowSequence(true), Edit::SequenceShare(0.9)]);
+        assert_eq!(tab.sequence_share, 0.75, "the pane leaves room for the map");
+        // A join's pane shows the new plasmid with the insert highlighted.
+        tab.change(None, |p| p.set_enzymes("cut_donor", vec!["EcoRI".into(), "BamHI".into()], true).unwrap());
+        tab.refresh(&[], false);
+        let product = step_index(&tab, "product");
+        tab.zoom_to(product);
+        screen.settle(&mut tab);
+        let preview = tab.preview.as_ref().unwrap();
+        let made = &tab.run.steps[product];
+        assert_eq!((preview.step, preview.tab.selection), (product, made.findings.parts.last().copied()));
     }
 }

@@ -7,7 +7,8 @@
 //!
 //! Keys (when the view has focus): letters type bases, Backspace/Delete remove, arrows move
 //! (Shift extends the selection), Home/End go to the row's ends, Ctrl+A selects all,
-//! Ctrl+C / Ctrl+X / Ctrl+V copy, cut and paste.
+//! Ctrl+C / Ctrl+X / Ctrl+V copy, cut and paste. A read-only document takes no typing or
+//! deleting, as the sequence under a protocol's map.
 
 use crate::app::ViewSettings;
 use crate::doc::DocTab;
@@ -517,7 +518,7 @@ fn handle_keys(ui: &egui::Ui, layout: &Layout, tab: &mut DocTab) {
     let mut moved_to: Option<usize> = None;
     for event in events {
         match event {
-            Event::Text(text) => {
+            Event::Text(text) if !tab.read_only => {
                 // Spaces and digits are skipped quietly. Other characters that are not sequence
                 // codes are refused with a note, so a typo never lands in the sequence.
                 let typed: String = text.chars().filter(|c| !c.is_whitespace()).collect();
@@ -545,7 +546,7 @@ fn handle_keys(ui: &egui::Ui, layout: &Layout, tab: &mut DocTab) {
                     Key::End if modifiers.command => Some(len),
                     Key::Home => Some(row_start),
                     Key::End => Some(row_end),
-                    Key::Backspace | Key::Delete => {
+                    Key::Backspace | Key::Delete if !tab.read_only => {
                         let before = tab.selection.map(|s| s.len().min(len));
                         let result = if key == Key::Backspace { tab.delete_backward() } else { tab.delete_forward() };
                         match result {

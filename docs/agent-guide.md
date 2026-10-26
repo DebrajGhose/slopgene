@@ -120,6 +120,7 @@ Each run starts again from the maps, so a protocol gives the new product after a
 | Task | Command |
 |---|---|
 | Write a restriction-cloning protocol and run it | `slopgene protocol new clone.json --vector pUC19.dna --insert donor.dna --cut-out GFP -e EcoRI,BamHI` |
+| The same, with the insert copied out of its map by PCR | `slopgene protocol new clone.json --vector pUC19.dna --insert donor.dna --cut-out GFP -e EcoRI,BamHI --pcr` |
 | Run a protocol | `slopgene protocol run clone.json --json` |
 | Settle a step that waits for a choice | `slopgene protocol run clone.json --choose insert=2 --save` |
 | Save the molecules the steps make | `slopgene protocol run clone.json --out-dir steps/` |
@@ -133,9 +134,12 @@ The insert is then the fragment that holds that part, whatever enzymes cut it.
 `-e` may be left out, and the cuts then wait for their enzymes.
 `--vector-enzymes` cuts the vector with other enzymes than the insert, such as BglII for a BamHI insert.
 `--keep-phosphates` leaves the dephosphorylation out.
+`--pcr` copies the insert out of its map by PCR instead of cutting it out.
+The donor is then followed by a PCR step (`pcr_donor`), a cut that trims the primers' tails (`cut_pcr`) and the pick.
+The enzymes go on the primers' 5' tails, the forward primer's first, and the cut uses the same enzymes.
 The file names each map relative to its own folder when the map lies inside it.
 
-Nine commands change a protocol file the way the app's bench does with the mouse.
+Twelve commands change a protocol file the way the app's bench does with the mouse.
 Each one writes the file back and runs it.
 A change that cannot be made is an error that says why, and the file stays as it was.
 The JSON is the run's JSON with `changed`, a few words on what changed, and `saved`.
@@ -151,12 +155,22 @@ The JSON is the run's JSON with `changed`, a few words on what changed, and `sav
 | Leave out a step that has one input | `slopgene protocol leave-out clone.json cip` |
 | Take a piece's 5' phosphates off on its way into a join | `slopgene protocol dephosphorylate clone.json backbone --join product` |
 | Say which way a piece goes into a join | `slopgene protocol turn clone.json insert --join product --way reverse` |
+| Copy a map's part out by PCR instead of cutting it out | `slopgene protocol copy-out clone.json donor` |
+| Cut it out again, without the PCR | `slopgene protocol cut-out clone.json donor` |
+| Keep a pair of the primers a PCR designed | `slopgene protocol primers clone.json pcr_donor --pair 1` |
+| Use primers of your own, or design them anew on each run | `slopgene protocol primers clone.json pcr_donor --fwd TAAGCAGAATTC... --rev ...`, `--clear` |
 
 `add` gives its steps new ids, such as `donor_2`, `cut_donor_2` and `insert_2`.
 Without `-e`, the new cut waits for its enzymes.
+`add --pcr` copies the part out by PCR, with the steps `pcr_donor_2`, `cut_pcr_2` and `insert_2`.
 `cut --no-part` forgets the part, and `cut -e ""` takes the enzymes off.
+`cut` on a PCR step changes the part it copies and the enzymes on its primers' tails, and the cut that trims the tails changes with it.
 New enzymes on the insert's cut carry over to a vector cut that used the same enzymes.
 The cut of a second insert keeps its own enzymes.
+New enzymes on a vector's cut carry over to the PCRs whose tails had the same enzymes, since a tail can carry any site, while a donor's cut keeps its own.
+`copy-out` and `cut-out` take any step of the map's lane, and switch the lane between a cut and a PCR with the same part and enzymes.
+`primers --pair N` keeps pair N of the pairs `protocol run` lists, 1 being the best.
+`--fwd` and `--rev` give two primers of your own, written 5' to 3' with their tails, and `--clear` designs them anew on each run.
 `put --into` a map cuts that map with the piece's own enzymes, so the ends match.
 It keeps the map's largest piece as the backbone, takes its 5' phosphates off, and adds a join of the two.
 `--keep-phosphates` leaves the phosphates on.
@@ -191,6 +205,7 @@ A step id names all of that step's outputs, and `id#2` names its second output.
 |---|---|---|
 | `open` | `path`, or `document` (a `slopgene.document/1` object) | starts from a map |
 | `digest` | `enzymes`, `around` (a feature's name or a range) | cuts one molecule and lists its fragments in order along it |
+| `amplify` | `region` (a feature's name or a range), `forward_enzyme`, `reverse_enzyme`, `forward_primer`, `reverse_primer` | copies the region by PCR, with the enzymes' sites on the primers' 5' tails |
 | `pick` | `index`, `size` with `tolerance`, `ends`, `contains`, `holds` (a range of the cut molecule), `largest`, `smallest` | keeps the one fragment that meets every criterion given |
 | `dephosphorylate` | none | removes both 5' phosphates of a linear fragment |
 | `flip` | none | turns a molecule end to end |
@@ -200,6 +215,18 @@ A digest's `around` names the part of the molecule the cut is about.
 The run says which fragment holds that part, and warns when an enzyme cuts inside it.
 A pick's `contains` matches the fragment that carries the most of the named feature, so a few of its bases in another fragment's overhang do not count.
 A digest without enzymes waits for them.
+A PCR without a region waits for it.
+A PCR designs primers for its region anew on each run until `forward_primer` and `reverse_primer` are set, which `protocol primers` does, and then checks them against the region on every run.
+Its JSON lists the `primers` used, each with its sequence, its melting temperature and where it anneals, and the `primer_pairs` designed, best first.
+Each tail is six spare bases and the enzyme's site, so the enzyme can cut near the end of the product.
+A PCR product carries no 5' phosphates, as primers are made without them, and the cut that trims its tails leaves phosphates on the piece kept.
+A PCR lane in a file reads like this:
+
+```json
+    {"id": "pcr_donor", "in": ["donor"], "type": "amplify", "params": {"region": "geneX", "forward_enzyme": "EcoRI", "reverse_enzyme": "BamHI"}},
+    {"id": "cut_pcr", "in": ["pcr_donor"], "type": "digest", "params": {"enzymes": ["EcoRI", "BamHI"], "around": "geneX"}},
+    {"id": "insert", "in": ["cut_pcr"], "type": "pick", "params": {"contains": "geneX"}}
+```
 
 A step chooses by itself only when exactly one option fits.
 A pick that several fragments match waits for a choice.
