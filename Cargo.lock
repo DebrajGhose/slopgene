@@ -3185,7 +3185,7 @@ checksum = "0c790de23124f9ab44544d7ac05d60440adc586479ce501c1d6d7da3cd8c9cf5"
 
 [[package]]
 name = "slopgene-cli"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -3197,7 +3197,7 @@ dependencies = [
 
 [[package]]
 name = "slopgene-core"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "lzma-rs",
  "serde",
@@ -3207,7 +3207,7 @@ dependencies = [
 
 [[package]]
 name = "slopgene-gui"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "eframe",
  "embed-resource",
@@ -3220,7 +3220,7 @@ dependencies = [
 
 [[package]]
 name = "slopgene-script"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "globset",
  "resvg",
