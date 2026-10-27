@@ -1,8 +1,8 @@
 //! Small ring maps for the protocol bench.
 //!
 //! A ring draws a molecule as a thick circle, or a bar when it is linear, in a few colours: green
-//! where the bases go on into the product, red where they are left over, and grey where nothing
-//! is decided yet. A cut molecule is drawn as its pieces, each a stretch of the ring with a small
+//! where the bases go on into the product, pale grey where they are left over, and the backbone's
+//! grey where nothing is decided yet. A cut molecule is drawn as its pieces, each a stretch of the ring with a small
 //! gap at every cut. A piece can be lifted away from the centre, so the pieces read as separate
 //! molecules that came out of the one ring. The part being worked on is turned to 12 o'clock.
 //! Features lie just inside the ring as thin arcs in their usual colours.

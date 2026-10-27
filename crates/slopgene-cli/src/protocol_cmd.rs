@@ -8,8 +8,22 @@ use crate::util::*;
 use anyhow::{Context, Result, anyhow, bail};
 use serde_json::json;
 use slopgene_core::protocol::{self, Action, Change, Folder, Protocol, Run, Status};
+use slopgene_core::render::ApproxMeasure;
+use slopgene_core::render::bench::{BenchOptions, render_bench};
 use slopgene_core::*;
 use std::path::{Path, PathBuf};
+
+/// Draw a protocol file as the bench the app shows, as SVG or PNG by the output's extension.
+pub fn render(path: &str, output: Option<&str>, dark: bool, scale: f32) -> Result<Output> {
+    let path = PathBuf::from(path);
+    let (plan, ran) = protocol::run_file(&path, enzyme_db())?;
+    let options = if dark { BenchOptions::dark() } else { BenchOptions::default() };
+    let scene = render_bench(&plan, &ran, &options, &ApproxMeasure);
+    let target = output.map(PathBuf::from).unwrap_or_else(|| path.with_extension("svg"));
+    crate::render_cmd::save_scene(&scene, &target, scale)?;
+    let value = json!({ "output": path_text(&target), "width": scene.width, "height": scene.height, "steps": plan.steps.len() });
+    Ok(Output::new(value, format!("wrote {}", path_text(&target))))
+}
 
 /// Run a protocol file. Each `choose` is STEP=OPTION and settles a step that waits for a choice.
 /// `save` writes the choices into the file; `out_dir` receives the molecules each step makes.

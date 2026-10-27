@@ -170,6 +170,12 @@ pub const API: &[ApiEntry] = &[
     entry(PROTOCOLS, "protocol_cut_out(path, step) -> map", "Cut a map's part out instead of copying it by PCR, the reverse of protocol_copy_out."),
     entry(
         PROTOCOLS,
+        "protocol_render(path, out) -> map",
+        "Draw the protocol as the app's bench, each map a small ring with its cut or PCR under it and the join below, and write it as SVG or PNG by the extension of out.",
+    ),
+    entry(PROTOCOLS, "protocol_render(path, out, options) -> map", "The same, with the options dark and scale (the pixel density of a PNG)."),
+    entry(
+        PROTOCOLS,
         "protocol_primers(path, step, options) -> map",
         "The primers of a PCR step: pair keeps pair N of those the run designs, forward and reverse give your own, tm aims the design at a melting temperature, and clear: true designs them anew.",
     ),

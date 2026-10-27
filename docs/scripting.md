@@ -358,6 +358,8 @@ print(`${piece.length} bp, ${piece.left.end} / ${piece.right.end}`);
 | `protocol_turn(path, piece, join, way) -> map` | Say which way a piece goes into a join: "forward", "reverse" or "either". |
 | `protocol_copy_out(path, step) -> map` | Copy a map's part out by PCR instead of cutting it out: a PCR step goes between the map and its cut, with the cut's enzymes on the primers' tails. |
 | `protocol_cut_out(path, step) -> map` | Cut a map's part out instead of copying it by PCR, the reverse of `protocol_copy_out`. |
+| `protocol_render(path, out) -> map` | Draw the protocol as the app's bench, each map a small ring with its cut or PCR under it and the join below, and write it as SVG or PNG by the extension of `out`. |
+| `protocol_render(path, out, options) -> map` | The same, with the options `dark` and `scale` (the pixel density of a PNG). |
 | `protocol_primers(path, step, options) -> map` | The primers of a PCR step: `pair` keeps pair N of those the run designs, `forward` and `reverse` give your own, `tm` aims the design at a melting temperature, and `clear: true` designs them anew. |
 
 These functions make the changes the app's protocol bench makes with the mouse.

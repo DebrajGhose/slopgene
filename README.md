@@ -298,6 +298,7 @@ Open as a tab opens a map or the new plasmid as a sequence of its own.
 A protocol takes a map from its open tab when there is one, so unsaved edits count.
 It saves as a `.json` file beside its maps, and `slopgene protocol run` runs the same file from the command line.
 The command line makes the bench's changes too, with `slopgene protocol add`, `cut`, `keep`, `put`, `take-out`, `remove-map`, `leave-out`, `dephosphorylate`, `turn`, `copy-out`, `cut-out` and `primers`.
+`slopgene protocol render` draws the bench as an SVG or PNG picture, and "Export the bench as a picture…" in the app writes the same picture.
 Scripts make them with `protocol_add`, `protocol_cut`, `protocol_put` and the other functions in [docs/scripting.md](docs/scripting.md).
 
 ## Building from source

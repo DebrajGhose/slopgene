@@ -688,6 +688,20 @@ enum ProtocolCommand {
         #[arg(long, conflicts_with_all = ["fwd", "rev"])]
         tm: Option<f64>,
     },
+    /// Draw the protocol as the app's bench: each map as a small ring, its cut or PCR under it with
+    /// the pieces coloured, and the join with the new plasmid, as SVG or PNG.
+    Render {
+        /// The protocol file (.json).
+        path: String,
+        /// The picture to write (.svg or .png); by default the protocol file's name with .svg.
+        #[arg(short, long)]
+        output: Option<String>,
+        #[arg(long)]
+        dark: bool,
+        /// Pixel density for PNG output.
+        #[arg(long, default_value_t = 2.0)]
+        scale: f32,
+    },
 }
 
 #[derive(Subcommand)]
@@ -935,6 +949,7 @@ fn run(command: Command) -> anyhow::Result<Output> {
                 }
                 protocol_cmd::change(&path, Change::Primers { step, pair, forward: fwd, reverse: rev, tm })
             }
+            ProtocolCommand::Render { path, output, dark, scale } => protocol_cmd::render(&path, output.as_deref(), dark, scale),
         },
         Command::Annotate { files, library, min_identity, min_length, output, in_place, save_library } => {
             cloning_cmd::annotate(&files.paths, files.recursive, &library, min_identity, min_length, output.as_deref(), in_place, save_library.as_deref())

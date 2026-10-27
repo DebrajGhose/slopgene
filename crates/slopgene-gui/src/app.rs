@@ -78,6 +78,7 @@ pub enum Action {
     Digest,
     ExportSvg,
     ExportPng,
+    ExportBench,
     ExportGenBank,
     ExportFasta,
     AlignRead,
@@ -127,6 +128,7 @@ impl Action {
         Action::TogglePrimers,
         Action::ExportSvg,
         Action::ExportPng,
+        Action::ExportBench,
         Action::ExportGenBank,
         Action::ExportFasta,
     ];
@@ -151,7 +153,7 @@ impl Action {
             | Action::ToggleEnzymes
             | Action::TogglePrimers
             | Action::Palette => "View",
-            Action::ExportSvg | Action::ExportPng | Action::ExportGenBank | Action::ExportFasta => "Export",
+            Action::ExportSvg | Action::ExportPng | Action::ExportBench | Action::ExportGenBank | Action::ExportFasta => "Export",
             _ => "Edit",
         }
     }
@@ -193,6 +195,7 @@ impl Action {
             Action::Digest => "Restriction digest…",
             Action::ExportSvg => "Export map as SVG…",
             Action::ExportPng => "Export map as PNG…",
+            Action::ExportBench => "Export the bench as a picture…",
             Action::ExportGenBank => "Export as GenBank…",
             Action::ExportFasta => "Export as FASTA…",
             Action::AlignRead => "Align reads or other sequences to this one…",
@@ -710,6 +713,25 @@ impl SlopGeneApp {
         }
     }
 
+    /// Write the bench of protocol `index` as an SVG or PNG picture: the picture the command
+    /// line's `protocol render` draws, in the app's current colours.
+    fn export_bench(&mut self, index: usize) {
+        let Some(tab) = self.protocols.get(index) else { return };
+        let name = if tab.protocol.name.is_empty() { "protocol".to_string() } else { tab.protocol.name.clone() };
+        let Some(path) = rfd::FileDialog::new().set_file_name(format!("{name}.svg")).add_filter("svg", &["svg"]).add_filter("png", &["png"]).save_file() else {
+            return;
+        };
+        let options = slopgene_core::render::bench::BenchOptions {
+            colors: self.settings.colors,
+            ..if self.settings.dark { slopgene_core::render::bench::BenchOptions::dark() } else { slopgene_core::render::bench::BenchOptions::default() }
+        };
+        let scene = slopgene_core::render::bench::render_bench(&tab.protocol, &tab.run, &options, &slopgene_core::render::ApproxMeasure);
+        match save_scene(&scene, &path, 2.0) {
+            Ok(()) => self.note(format!("exported {}", path.display())),
+            Err(e) => self.note(format!("could not export: {e}")),
+        }
+    }
+
     /// Run an action from the palette, a shortcut or a button.
     fn perform(&mut self, action: Action, ctx: &egui::Context) {
         // With a protocol in front, the file and history commands act on it.
@@ -749,6 +771,7 @@ impl SlopGeneApp {
             Action::ExportFasta => self.save_as_dialog(Some(Format::Fasta)),
             Action::ExportSvg => self.export_map(false),
             Action::ExportPng => self.export_map(true),
+            Action::ExportBench => self.note("this command draws a cloning protocol: show its tab first"),
             Action::Close => self.request_close(self.active),
             Action::Reload => {
                 if let Some(t) = self.tab()
@@ -1070,6 +1093,7 @@ impl SlopGeneApp {
                 self.protocols[index].refresh(&self.tabs, true);
                 self.note("read the maps again");
             }
+            Action::ExportBench => self.export_bench(index),
             Action::Open
             | Action::NewSequence
             | Action::NewProtocol

@@ -41,7 +41,11 @@ use slopgene_core::protocol::{
     self, Action, AmplifyParams, DigestParams, LigateParams, OpenParams, Orientation, PartRole, PickParams, Piece, Protocol, Run, Status, Step, StepRun,
     split_reference,
 };
-use slopgene_core::render::ring::{self, RingOptions, RingPiece, Role};
+use slopgene_core::render::bench::{
+    self, Board, CARD_STATUS, CARD_TITLE, COLUMN_GAP, Card, CutView, Kind, Link, MAIN_SLOT, MARGIN, Made, OTHER_SLOT, Picture, PillTarget, ROW_GAP, Shown,
+    Tone, board, join_products, join_slots, product_top,
+};
+use slopgene_core::render::ring::{self, RingOptions, Role};
 use slopgene_core::render::{MapOptions, Rgba, Scene, SiteMark, Tag, Theme, render_map, thousands};
 use slopgene_core::*;
 use std::path::{Path, PathBuf};
@@ -57,25 +61,8 @@ const MERGE_WINDOW: Duration = Duration::from_secs(2);
 /// How long a zoom between the bench and a detailed view takes, in seconds.
 const ZOOM_SECONDS: f32 = 0.35;
 
-/// A card's size on the bench at scale 1, the gaps between columns and rows, and the margin
-/// around the bench.
-const CARD: egui::Vec2 = vec2(250.0, 232.0);
-const COLUMN_GAP: f32 = 70.0;
-const ROW_GAP: f32 = 54.0;
-const MARGIN: f32 = 22.0;
-
-/// The heights of a card's title line and status line. The ring fills the rest.
-const CARD_TITLE: f32 = 28.0;
-const CARD_STATUS: f32 = 26.0;
-
-/// The widths at scale 1 of the places on a join's card for one plasmid each: the product or an
-/// option, and another plasmid of the tube, which is drawn smaller. A card with one plasmid is as
-/// wide as any other card.
-const MAIN_SLOT: f32 = CARD.x - 24.0;
-const OTHER_SLOT: f32 = 150.0;
-
-/// The most plasmids a join's card shows. Its status line counts the rest.
-const SHOWN: usize = 4;
+/// A card's size on the bench at scale 1, as the core lays the bench out.
+const CARD: egui::Vec2 = vec2(bench::CARD[0], bench::CARD[1]);
 
 /// The width of the strip beside a join's detailed picture that lists the other plasmids of its
 /// tube.
@@ -495,451 +482,6 @@ fn partner(protocol: &Protocol, run: &Run, step: usize) -> Option<Piece> {
     protocol.steps[join].inputs.iter().enumerate().filter(|(ii, _)| *ii != mine).find_map(|(_, input)| run.resolve(input).first().map(|p| (*p).clone()))
 }
 
-/// What a card on the bench stands for.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Kind {
-    /// A map the protocol starts from.
-    Plasmid,
-    /// A cut, with the picks that keep its pieces.
-    Cut,
-    /// A PCR, which draws its product: the part copied, with the primers' tails on its ends.
-    Copy,
-    /// A join, which draws the product.
-    Join,
-    /// Any other step, told in words.
-    Other,
-    /// A place to start an empty protocol.
-    Start,
-    /// A place to put the insert into a vector, while no join takes it.
-    PutInto,
-    /// A place to add another map, once a join exists.
-    AddPlasmid,
-}
-
-/// One card on the bench.
-#[derive(Clone, Debug, PartialEq)]
-struct Card {
-    kind: Kind,
-    /// The step the card stands for. A place to start or to put the insert has none.
-    step: Option<usize>,
-    /// The picks folded into a cut's card, by step.
-    picks: Vec<usize>,
-    /// Where the card sits: a column, between two for a join of both, and a row.
-    column: f32,
-    row: usize,
-    /// How many columns wide it is, around its column: 1 for a card, more for a join that shows
-    /// several plasmids.
-    width: f32,
-}
-
-/// An arrow from one card to another, with the steps on the way (a dephosphorylation, a flip).
-#[derive(Clone, Debug, PartialEq)]
-struct Link {
-    from: usize,
-    to: usize,
-    treatments: Vec<usize>,
-}
-
-/// The cards and arrows of a protocol, and the card that shows each step.
-#[derive(Clone, Debug, Default, PartialEq)]
-struct Board {
-    cards: Vec<Card>,
-    links: Vec<Link>,
-    home: Vec<Option<usize>>,
-}
-
-impl Board {
-    /// The card that shows step `step`.
-    fn card_of(&self, step: usize) -> Option<usize> {
-        self.home.get(step).copied().flatten()
-    }
-
-    /// The cut card that a card leads into, such as a plasmid's cut.
-    fn cut_after(&self, card: usize) -> Option<usize> {
-        self.links.iter().find(|l| l.from == card && self.cards[l.to].kind == Kind::Cut).map(|l| l.to)
-    }
-
-    /// The plasmid card that leads into cut card `card`, the other way round from `cut_after`.
-    fn plasmid_before(&self, card: usize) -> Option<usize> {
-        self.links.iter().find(|l| l.to == card && self.cards[l.from].kind == Kind::Plasmid).map(|l| l.from)
-    }
-
-    /// The PCR card that a card leads into, such as a plasmid's PCR.
-    fn copy_after(&self, card: usize) -> Option<usize> {
-        self.links.iter().find(|l| l.from == card && self.cards[l.to].kind == Kind::Copy).map(|l| l.to)
-    }
-
-    /// The card that leads into card `card`, whatever it is: the plasmid or the PCR before a cut.
-    fn before(&self, card: usize) -> Option<usize> {
-        self.links.iter().find(|l| l.to == card).map(|l| l.from)
-    }
-
-    /// The step whose part a plasmid card's map sets: the PCR after the plasmid, or else its cut.
-    fn part_step_after(&self, card: usize) -> Option<usize> {
-        self.copy_after(card).or_else(|| self.cut_after(card)).and_then(|c| self.cards[c].step)
-    }
-
-    /// The bench's size at scale 1.
-    fn size(&self) -> egui::Vec2 {
-        // The right edge of the card that reaches furthest, in columns.
-        let columns = self.cards.iter().map(|c| c.column + (c.width + 1.0) / 2.0).fold(1.0, f32::max);
-        let rows = self.cards.iter().map(|c| c.row + 1).max().unwrap_or(1) as f32;
-        vec2(2.0 * MARGIN + columns * CARD.x + (columns - 1.0) * COLUMN_GAP, 2.0 * MARGIN + rows * CARD.y + (rows - 1.0) * ROW_GAP)
-    }
-}
-
-/// How many plasmids a join's card shows: its product or its options in full-size places, and
-/// the other plasmids of its tube in smaller places after them, [`SHOWN`] in all.
-fn join_slots(result: Option<&StepRun>) -> (usize, usize) {
-    let Some(result) = result else { return (1, 0) };
-    let main = match result.status {
-        Status::NeedsChoice => result.choices.len().clamp(1, SHOWN),
-        _ => 1,
-    };
-    let others = match result.status {
-        Status::Done | Status::NeedsChoice => result.findings.byproducts.len().min(SHOWN - main),
-        _ => 0,
-    };
-    (main, others)
-}
-
-/// How many columns wide a join's card is: one for one plasmid, and more for each one more.
-fn join_width(result: Option<&StepRun>) -> f32 {
-    let (main, others) = join_slots(result);
-    let pixels = (24.0 + main as f32 * MAIN_SLOT + others as f32 * OTHER_SLOT).max(CARD.x);
-    (pixels + COLUMN_GAP) / (CARD.x + COLUMN_GAP)
-}
-
-/// Add a card for step `step` under the card `source` came from, or in a new column, with an
-/// arrow from its source.
-fn add_card(board: &mut Board, columns: &mut f32, kind: Kind, step: usize, source: Option<&(usize, Vec<usize>)>) -> usize {
-    let (column, row) = match source {
-        Some((card, _)) => (board.cards[*card].column, board.cards[*card].row + 1),
-        None => {
-            *columns += 1.0;
-            (*columns - 1.0, 0)
-        }
-    };
-    board.cards.push(Card { kind, step: Some(step), picks: Vec::new(), column, row, width: 1.0 });
-    let me = board.cards.len() - 1;
-    if let Some((from, treatments)) = source {
-        board.links.push(Link { from: *from, to: me, treatments: treatments.clone() });
-    }
-    me
-}
-
-/// Lay a protocol out as a bench. Each map starts a column. A cut sits under what it cuts, and
-/// the picks of its pieces fold into it. A dephosphorylation or a flip rides on the arrow that
-/// leaves the card. A join sits under its inputs, between their columns, and is as wide as the
-/// plasmids `run` says its tube makes.
-fn board(protocol: &Protocol, run: &Run) -> Board {
-    let steps = &protocol.steps;
-    let mut board = Board { home: vec![None; steps.len()], ..Board::default() };
-    // Where each step's output is shown: its card, and the treatments it has had since.
-    let mut out: Vec<Option<(usize, Vec<usize>)>> = vec![None; steps.len()];
-    let mut columns = 0.0;
-    let earlier = |ii: usize, reference: &str| steps[..ii].iter().position(|s| s.id == split_reference(reference).0);
-    for (ii, step) in steps.iter().enumerate() {
-        let source = step.inputs.first().and_then(|r| earlier(ii, r)).and_then(|jj| out[jj].clone());
-        let card = match &step.action {
-            Action::Open(_) => add_card(&mut board, &mut columns, Kind::Plasmid, ii, None),
-            Action::Digest(_) => add_card(&mut board, &mut columns, Kind::Cut, ii, source.as_ref()),
-            Action::Amplify(_) => add_card(&mut board, &mut columns, Kind::Copy, ii, source.as_ref()),
-            Action::Pick(_) => match &source {
-                Some((card, treatments)) if board.cards[*card].kind == Kind::Cut && treatments.is_empty() => {
-                    board.cards[*card].picks.push(ii);
-                    *card
-                }
-                _ => add_card(&mut board, &mut columns, Kind::Other, ii, source.as_ref()),
-            },
-            Action::Dephosphorylate(_) | Action::Flip(_) => match source {
-                Some((card, mut treatments)) => {
-                    treatments.push(ii);
-                    out[ii] = Some((card, treatments));
-                    board.home[ii] = Some(card);
-                    continue;
-                }
-                None => add_card(&mut board, &mut columns, Kind::Other, ii, None),
-            },
-            Action::Ligate(_) => {
-                let sources: Vec<(usize, Vec<usize>)> = step.inputs.iter().filter_map(|r| earlier(ii, r)).filter_map(|jj| out[jj].clone()).collect();
-                let row = sources.iter().map(|(c, _)| board.cards[*c].row + 1).max().unwrap_or(0);
-                let column = if sources.is_empty() {
-                    columns += 1.0;
-                    columns - 1.0
-                } else {
-                    sources.iter().map(|(c, _)| board.cards[*c].column).sum::<f32>() / sources.len() as f32
-                };
-                // The run counts only when it is of this protocol, as it is between an edit and
-                // the next run.
-                let result = run.steps.get(ii).filter(|r| r.id == step.id);
-                board.cards.push(Card { kind: Kind::Join, step: Some(ii), picks: Vec::new(), column, row, width: join_width(result) });
-                let me = board.cards.len() - 1;
-                for (from, treatments) in sources {
-                    board.links.push(Link { from, to: me, treatments });
-                }
-                me
-            }
-        };
-        out[ii] = Some((card, Vec::new()));
-        board.home[ii] = Some(card);
-    }
-    // An empty protocol starts with a place for a map. A kept piece that no join takes yet gets a
-    // place for the plasmid it goes into, and once a join exists a place to add another map sits
-    // at the end of the top row.
-    let joins = steps.iter().any(|s| matches!(s.action, Action::Ligate(_)));
-    let place = |kind: Kind, column: f32| Card { kind, step: None, picks: Vec::new(), column, row: 0, width: 1.0 };
-    if board.cards.is_empty() {
-        board.cards.push(place(Kind::Start, 0.0));
-    } else if !joins && steps.iter().any(|s| matches!(s.action, Action::Pick(_))) {
-        board.cards.push(place(Kind::PutInto, columns));
-    } else if joins {
-        board.cards.push(place(Kind::AddPlasmid, columns));
-    }
-    // Two cards that overlap in one row: the later one moves down a row.
-    for ii in 1..board.cards.len() {
-        let overlaps = |c: &Card, d: &Card| c.row == d.row && (c.column - d.column).abs() < (c.width + d.width) / 2.0 - 0.1;
-        while board.cards[..ii].iter().any(|c| overlaps(c, &board.cards[ii])) {
-            board.cards[ii].row += 1;
-        }
-    }
-    // A wide join can reach left of the first column, and then the whole bench moves right.
-    let left = board.cards.iter().map(|c| c.column - (c.width - 1.0) / 2.0).fold(0.0, f32::min);
-    for card in &mut board.cards {
-        card.column -= left;
-    }
-    board
-}
-
-/// A cut as the bench draws it: the molecule it cuts, its pieces with their roles (and the
-/// output each piece is, once cut), its cuts, its part, and the base turned to the top.
-struct CutView {
-    parent: Document,
-    pieces: Vec<(Span, Role, Option<usize>)>,
-    cuts: Vec<SiteMark>,
-    region: Option<Span>,
-    top: usize,
-    /// Whether the enzymes have cut, rather than the part being shown before any cut.
-    cut: bool,
-}
-
-/// The bases of a molecule outside `region`: one stretch round a circle, up to two on a line.
-fn complement(region: Span, len: usize, circular: bool) -> Vec<Span> {
-    if circular {
-        return if region.len() < len { vec![Span::new(region.end, region.start + len).normalize(len)] } else { Vec::new() };
-    }
-    let mut out = Vec::new();
-    if region.start > 0 {
-        out.push(Span::new(0, region.start));
-    }
-    if region.end < len {
-        out.push(Span::new(region.end, len));
-    }
-    out
-}
-
-/// The cut a card shows, from the run: its pieces coloured by what the picks kept. Before any cut
-/// the part and the rest are coloured by what the cut is for.
-fn cut_view(tab: &ProtocolTab, card: &Card) -> Option<CutView> {
-    let step = card.step?;
-    let result = tab.run.steps.get(step)?;
-    let parent = result.inputs.first()?.doc.clone();
-    let len = parent.len().max(1);
-    let region = result.findings.region;
-    // The pieces the picks kept, and those a pick waits to choose among, by where they lay.
-    let picks: Vec<&StepRun> = card.picks.iter().filter_map(|&p| tab.run.steps.get(p)).collect();
-    let kept: Vec<Span> = picks.iter().filter(|r| r.status == Status::Done).flat_map(|r| r.outputs.iter().filter_map(|o| o.origin.map(|g| g.span))).collect();
-    let open: Vec<Span> = picks
-        .iter()
-        .filter(|r| r.status == Status::NeedsChoice)
-        .flat_map(|r| r.choices.iter().flat_map(|c| c.outputs.iter().filter_map(|o| o.origin.map(|g| g.span))))
-        .collect();
-    let mut view = CutView { parent, pieces: Vec::new(), cuts: Vec::new(), region, top: 0, cut: false };
-    if result.status == Status::Done && !result.outputs.is_empty() {
-        view.cut = true;
-        for (ii, piece) in result.outputs.iter().enumerate() {
-            let Some(origin) = piece.origin else { continue };
-            let role = if kept.contains(&origin.span) {
-                Role::Kept
-            } else if open.contains(&origin.span) || card.picks.is_empty() {
-                Role::Plain
-            } else {
-                Role::LeftOver
-            };
-            view.pieces.push((origin.span, role, Some(ii)));
-        }
-        for (name, pos) in &result.findings.cuts {
-            if !view.cuts.iter().any(|m| m.pos == *pos) {
-                view.cuts.push(SiteMark { name: name.clone(), pos: *pos });
-            }
-        }
-    } else if let Some(region) = region {
-        let role = tab.protocol.steps.get(step).and_then(|s| protocol::part_role(&tab.protocol, &s.id));
-        let (part, rest) = match role {
-            Some(PartRole::Keep) => (Role::Kept, Role::LeftOver),
-            Some(PartRole::Replace) => (Role::LeftOver, Role::Kept),
-            None => (Role::Plain, Role::Plain),
-        };
-        view.pieces.push((region, part, None));
-        view.pieces.extend(complement(region, len, view.parent.is_circular()).into_iter().map(|s| (s, rest, None)));
-    }
-    // What sits at the top is where the work happens: the part when one is named. Otherwise it is
-    // the piece kept, or for a kept backbone (the largest piece) the opening its cuts leave,
-    // which is where the insert goes. Failing both, the smallest piece.
-    let largest = view.pieces.iter().map(|p| p.0.len()).max().unwrap_or(0);
-    let circular = view.parent.is_circular();
-    let kept = view.pieces.iter().find(|p| p.1 == Role::Kept).map(|p| p.0);
-    let focus = region
-        .or_else(|| kept.map(|k| if k.len() == largest && view.pieces.len() > 1 { complement(k, len, circular).first().copied().unwrap_or(k) } else { k }))
-        .or_else(|| view.pieces.iter().map(|p| p.0).min_by_key(|s| s.len()));
-    view.top = focus.map_or(0, |s| (s.start + s.len() / 2) % len);
-    Some(view)
-}
-
-/// The part PCR step `step` copies, as found on its template in the run, with the template's
-/// length and shape.
-fn copy_region(tab: &ProtocolTab, step: usize) -> Option<(Span, usize, bool)> {
-    let result = tab.run.steps.get(step)?;
-    let template = result.inputs.first()?;
-    Some((result.findings.region?, template.doc.len().max(1), template.doc.is_circular()))
-}
-
-/// The tails on the product of a PCR, in bases at each end, as the run found them.
-fn tail_lengths(result: &StepRun) -> (usize, usize) {
-    let [left, right] = result.findings.tails;
-    (left, right)
-}
-
-/// The middle base of the last part of a product (the insert, in a template's join), to turn to
-/// the top.
-fn product_top(parts: &[Span], len: usize) -> usize {
-    parts.last().map_or(0, |s| (s.start + s.len() / 2) % len.max(1))
-}
-
-/// What one plasmid that a join shows stands for.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Made {
-    /// The join's product.
-    Product,
-    /// One of the options of a join that waits for a choice, from 0.
-    Option(usize),
-    /// Another plasmid the join's tube makes, by its place among the by-products, from 0.
-    Other(usize),
-}
-
-/// One plasmid a join shows, with the stretch of it each piece became.
-struct Shown<'a> {
-    made: Made,
-    piece: &'a Piece,
-    parts: &'a [Span],
-}
-
-/// The plasmids a join shows: its product, or its options while it waits for a choice, and then
-/// the other plasmids its tube makes. A join that is not made shows none.
-fn join_products(result: &StepRun) -> Vec<Shown<'_>> {
-    let mut shown = Vec::new();
-    match result.status {
-        Status::Done => {
-            if let Some(piece) = result.outputs.first() {
-                shown.push(Shown { made: Made::Product, piece, parts: &result.findings.parts });
-            }
-        }
-        Status::NeedsChoice => {
-            for (ii, choice) in result.choices.iter().enumerate() {
-                if let Some(piece) = choice.outputs.first() {
-                    shown.push(Shown { made: Made::Option(ii), piece, parts: &choice.parts });
-                }
-            }
-        }
-        Status::Failed | Status::Skipped => return shown,
-    }
-    for (ii, other) in result.findings.byproducts.iter().enumerate() {
-        shown.push(Shown { made: Made::Other(ii), piece: &other.piece, parts: &other.parts });
-    }
-    shown
-}
-
-/// How to draw one plasmid of a join as a ring. The product and the options are green, as they
-/// are what the plan makes. The other plasmids of the tube are grey. Each ring turns its last
-/// insert to the top, and a backbone closed on itself turns its seam there, where the insert is
-/// missing. The joins are marked.
-fn made_ring(shown: &Shown, settings: &ViewSettings, background: Color32) -> RingOptions {
-    let len = shown.piece.doc.len().max(1);
-    let other = matches!(shown.made, Made::Other(_));
-    let role = if other { Role::Plain } else { Role::Kept };
-    let title = match shown.made {
-        Made::Product => Some("New plasmid".to_string()),
-        Made::Option(ii) => Some(format!("Option {}", ii + 1)),
-        Made::Other(_) => None,
-    };
-    RingOptions {
-        theme: theme_on(settings, background),
-        colors: settings.colors,
-        gaps: true,
-        top: if shown.parts.len() == 1 { 0 } else { product_top(shown.parts, len) },
-        pieces: shown.parts.iter().map(|span| RingPiece { span: *span, role, lift: 0.0, label: None }).collect(),
-        marks: shown.parts.iter().map(|span| SiteMark { name: String::new(), pos: span.start % len }).collect(),
-        title,
-        subtitle: Some(format!("{} bp", thousands(shown.piece.doc.len()))),
-        ..RingOptions::default()
-    }
-}
-
-/// What a join's input is, in a word or two for a caption: "geneX piece", "backbone".
-fn short_name(tab: &ProtocolTab, reference: &str) -> String {
-    let words = protocol::piece_name(&tab.protocol, &tab.run, reference);
-    words.strip_prefix("the ").map(str::to_string).unwrap_or(words)
-}
-
-/// A few words for the line under one plasmid of join step `step`: an option's number and which
-/// way its insert goes, or how another plasmid of the tube differs from the product.
-fn made_caption(tab: &ProtocolTab, step: usize, made: Made) -> String {
-    let (Some(result), Some(inputs)) = (tab.run.steps.get(step), tab.protocol.steps.get(step).map(|s| &s.inputs)) else { return String::new() };
-    let name = |input: usize| inputs.get(input).map(|r| short_name(tab, r)).unwrap_or_default();
-    match made {
-        Made::Product => String::new(),
-        Made::Option(ii) => {
-            // The ring already says which option it is, so the words say which way the inserts
-            // go: each by name with one insert, and the ones turned round with several.
-            let Some(protocol::Pin::Orientations(ways)) = result.choices.get(ii).map(|c| &c.pin) else { return String::new() };
-            let turned: Vec<String> = ways.iter().enumerate().filter(|(_, w)| **w == Orientation::Reverse).map(|(jj, _)| name(jj + 1)).collect();
-            match (ways.as_slice(), turned.is_empty()) {
-                ([way], _) => format!("{} {}", name(1), way.words()),
-                (_, true) => "all as given".into(),
-                (_, false) => format!("{} turned round", protocol::and_list(&turned)),
-            }
-        }
-        Made::Other(ii) => {
-            let Some(other) = result.findings.byproducts.get(ii) else { return String::new() };
-            if other.alone() {
-                return "no insert".into();
-            }
-            let mut said: Vec<String> = Vec::new();
-            let missing: Vec<String> = other.missing(inputs.len()).into_iter().map(name).collect();
-            if !missing.is_empty() {
-                said.push(format!("without {}", protocol::and_list(&missing)));
-            }
-            if other.reordered() {
-                said.push("other order".into());
-            }
-            let turned = other.turned(&protocol::reference_arrangement(result, inputs.len()));
-            // With one insert, which piece turned goes without saying.
-            match turned.as_slice() {
-                [] => {}
-                [_] if inputs.len() == 2 => said.push("other way round".into()),
-                _ => said.push(format!("{} turned", protocol::and_list(&turned.into_iter().map(name).collect::<Vec<_>>()))),
-            }
-            said.join(" · ")
-        }
-    }
-}
-
-/// A ring to draw: the molecule and how to draw it, without its size.
-struct Picture {
-    doc: Document,
-    options: RingOptions,
-}
-
 /// The theme for drawings on a background of this colour.
 fn theme_on(settings: &ViewSettings, background: Color32) -> Theme {
     let mut theme = if settings.dark { Theme::dark() } else { Theme::light() };
@@ -947,96 +489,40 @@ fn theme_on(settings: &ViewSettings, background: Color32) -> Theme {
     theme
 }
 
-/// The ring a card draws: the map whole for a plasmid, with its pieces coloured once its cut is
-/// chosen; the pieces pulled apart for a cut; the new plasmid for a join. `detail` asks for the
-/// labels of the large view. `None` when there is nothing to draw yet.
+/// The cut a card shows, as the core colours it from the run.
+fn cut_view(tab: &ProtocolTab, card: &Card) -> Option<CutView> {
+    bench::cut_view(&tab.protocol, &tab.run, card)
+}
+
+/// The part a PCR step copies, as the run found it on its template.
+fn copy_region(tab: &ProtocolTab, step: usize) -> Option<(Span, usize, bool)> {
+    bench::copy_region(&tab.run, step)
+}
+
+/// How to draw one plasmid of a join as a ring, on this background.
+fn made_ring(shown: &Shown, settings: &ViewSettings, background: Color32) -> RingOptions {
+    bench::made_ring(shown, theme_on(settings, background), settings.colors)
+}
+
+/// The line under one plasmid of a join.
+fn made_caption(tab: &ProtocolTab, step: usize, made: Made) -> String {
+    bench::made_caption(&tab.protocol, &tab.run, step, made)
+}
+
+/// The ring a card draws, as the core makes it, on this background.
 fn picture(tab: &ProtocolTab, board: &Board, card: usize, detail: bool, settings: &ViewSettings, background: Color32) -> Option<Picture> {
-    let card_ref = &board.cards[card];
-    let step = card_ref.step?;
-    let result = tab.run.steps.get(step)?;
-    let mut options = RingOptions { theme: theme_on(settings, background), colors: settings.colors, gaps: true, ..RingOptions::default() };
-    match card_ref.kind {
-        Kind::Plasmid => {
-            let doc = result.outputs.first()?.doc.clone();
-            options.title = Some(doc.name.clone());
-            options.subtitle = Some(format!("{} bp", thousands(doc.len())));
-            if let Some(view) = board.cut_after(card).and_then(|c| cut_view(tab, &board.cards[c])) {
-                options.top = view.top;
-                options.gaps = view.cut;
-                options.marks = view.cuts;
-                options.pieces = view.pieces.iter().map(|(span, role, _)| RingPiece { span: *span, role: *role, lift: 0.0, label: None }).collect();
-            } else if let Some((region, len, circular)) = board.copy_after(card).and_then(|c| board.cards[c].step).and_then(|s| copy_region(tab, s)) {
-                // A plasmid a PCR copies from shows the part copied. The rest stays as it is, so
-                // it is neither kept nor left over.
-                options.top = (region.start + region.len() / 2) % len;
-                options.gaps = false;
-                options.pieces = vec![RingPiece { span: region, role: Role::Kept, lift: 0.0, label: None }];
-                options.pieces.extend(complement(region, len, circular).into_iter().map(|s| RingPiece { span: s, role: Role::Plain, lift: 0.0, label: None }));
-            }
-            Some(Picture { doc, options })
-        }
-        Kind::Copy => {
-            // The product as a bar: the copy of the part in green, with the primers' tails in grey
-            // at its ends, where the enzyme sites are.
-            let doc = result.outputs.first()?.doc.clone();
-            let len = doc.len();
-            let (left, right) = tail_lengths(result);
-            let (left, right) = (left.min(len), right.min(len.saturating_sub(left)));
-            options.title = Some("PCR product".into());
-            options.subtitle = Some(format!("{} bp", thousands(len)));
-            options.gaps = false;
-            if left > 0 {
-                options.pieces.push(RingPiece { span: Span::new(0, left), role: Role::Plain, lift: 0.0, label: None });
-            }
-            options.pieces.push(RingPiece { span: Span::new(left, len - right), role: Role::Kept, lift: 0.0, label: None });
-            if right > 0 {
-                options.pieces.push(RingPiece { span: Span::new(len - right, len), role: Role::Plain, lift: 0.0, label: None });
-            }
-            Some(Picture { doc, options })
-        }
-        Kind::Cut => {
-            let view = cut_view(tab, card_ref).filter(|v| v.cut)?;
-            let len = view.parent.len();
-            let largest = view.pieces.iter().map(|p| p.0.len()).max().unwrap_or(0);
-            let part = match &tab.protocol.steps[step].action {
-                Action::Digest(d) => d.around.clone(),
-                _ => None,
-            };
-            let few = view.pieces.len() <= 3;
-            options.top = view.top;
-            options.marks = view.cuts.clone();
-            options.mark_labels = detail;
-            options.pieces = view
-                .pieces
-                .iter()
-                .map(|(span, role, _)| {
-                    // Every piece but the largest pulls away, so the backbone stays where it was.
-                    let lift = if span.len() < largest || view.pieces.len() == 1 { if detail { 26.0 } else { 13.0 } } else { 0.0 };
-                    let size = format!("{} bp", thousands(span.len()));
-                    let holds_part = view.region.is_some_and(|r| span.contains_span(&r, len));
-                    let label = match (detail, role) {
-                        (true, Role::Kept) => {
-                            Some(format!("{}{size} · kept", part.as_ref().filter(|_| holds_part).map(|p| format!("{p} · ")).unwrap_or_default()))
-                        }
-                        (true, Role::LeftOver) => Some(format!("{size} · left over")),
-                        (true, Role::Plain) => Some(size),
-                        (false, Role::Kept) => Some(size),
-                        (false, _) if few => Some(size),
-                        (false, _) => None,
-                    };
-                    RingPiece { span: *span, role: *role, lift, label }
-                })
-                .collect();
-            Some(Picture { doc: view.parent, options })
-        }
-        Kind::Join => {
-            // The product, or while the direction waits, the first of the options: the plasmid
-            // in the card's first place.
-            let products = join_products(result);
-            let first = products.first()?;
-            Some(Picture { doc: first.piece.doc.clone(), options: made_ring(first, settings, background) })
-        }
-        Kind::Other | Kind::Start | Kind::PutInto | Kind::AddPlasmid => None,
+    bench::picture(&tab.protocol, &tab.run, board, card, detail, theme_on(settings, background), settings.colors)
+}
+
+/// The colour of words in this tone.
+fn tone_color(tone: Tone, palette: &Palette) -> Color32 {
+    match tone {
+        Tone::Ink => palette.ink,
+        Tone::Muted => palette.muted,
+        Tone::Faint => palette.faint,
+        Tone::Ok => palette.ok,
+        Tone::Warn => palette.warn,
+        Tone::Error => palette.error,
     }
 }
 
@@ -1729,7 +1215,10 @@ fn bench(
 ) -> Vec<(usize, Rect, Rect)> {
     let mut rings = Vec::new();
     let room = ui.available_size();
-    let size = board.size();
+    let size = {
+        let [w, h] = board.size();
+        vec2(w, h)
+    };
     let scale = (room.x / size.x).min(room.y / size.y).clamp(0.8, 1.45);
     // Dragging on the bench carries pieces, so it never scrolls the bench, even on a touch screen.
     let scrolling = egui::scroll_area::ScrollSource { drag: egui::scroll_area::DragScroll::Never, ..Default::default() };
@@ -1781,121 +1270,21 @@ fn fit(ui: &egui::Ui, text: &str, font: egui::FontId, width: f32) -> String {
     String::new()
 }
 
-/// A problem in a few words for a card's status line, from its code. The panel gives it whole.
-fn short_problem(issue: &protocol::Issue) -> String {
-    match issue.code {
-        "ends.incompatible" => "The ends do not pair".into(),
-        "ends.no_phosphate" => "No 5' phosphate at a join".into(),
-        "digest.no_cut" => "The enzymes do not cut it".into(),
-        "digest.unknown_enzyme" | "amplify.unknown_enzyme" => "An enzyme is unknown".into(),
-        "amplify.no_part" => "The part is not on the map".into(),
-        "amplify.no_primers" => "No primers fit the part".into(),
-        "amplify.no_product" => "The primers make no product".into(),
-        "amplify.stale" => "The primers no longer fit the part".into(),
-        "pick.no_match" => "No piece fits".into(),
-        "pick.stale" => "The piece kept changed".into(),
-        "open.unreadable" | "open.nothing" => "The map cannot be read".into(),
-        _ => issue.message.clone(),
-    }
-}
-
 /// A card's title (a verb, then what it acts on) and its status line with the line's colour.
 fn card_text(tab: &ProtocolTab, board: &Board, card: usize, palette: &Palette) -> (String, String, String, Color32) {
-    let c = &board.cards[card];
-    let result = c.step.and_then(|s| tab.run.steps.get(s));
-    let status = result.map(|r| r.status);
-    let problem = || result.and_then(|r| r.error.as_ref()).map(short_problem).unwrap_or_default();
-    match c.kind {
-        Kind::Plasmid => {
-            let made = result.and_then(|r| r.outputs.first());
-            let name = made.map(|p| p.doc.name.clone()).unwrap_or_else(|| "choose a map".into());
-            match (status, made) {
-                (Some(Status::Done), Some(p)) => {
-                    let shape = if p.doc.is_circular() { "circular" } else { "linear" };
-                    ("START".into(), name, format!("{} bp · {shape}", thousands(p.doc.len())), palette.muted)
-                }
-                _ => ("START".into(), name, problem(), palette.error),
-            }
+    let text = bench::card_text(&tab.protocol, &tab.run, board, card);
+    let line = if board.cards[card].kind == Kind::PutInto {
+        let pick = board.cards.iter().find_map(|other| carried_by(tab, other));
+        let droppable = pick.is_some_and(|pick| (0..board.cards.len()).any(|ii| drop_onto(tab, board, ii, pick).is_some()));
+        match (droppable, pick.is_some()) {
+            (true, _) => "or drag the green piece onto a plasmid".to_string(),
+            (false, true) => "that the green piece goes into".to_string(),
+            (false, false) => text.line,
         }
-        Kind::Cut => {
-            let Some(Action::Digest(params)) = c.step.map(|s| &tab.protocol.steps[s].action) else { return Default::default() };
-            let enzymes = if params.enzymes.is_empty() { "choose enzymes".to_string() } else { params.enzymes.join(" + ") };
-            let picks: Vec<&StepRun> = c.picks.iter().filter_map(|&p| tab.run.steps.get(p)).collect();
-            let (line, color) = match status {
-                Some(Status::NeedsChoice) => {
-                    let around = params.around.as_deref().map(|p| format!(" around {p}")).unwrap_or_default();
-                    (format!("Choose where to cut{around}"), palette.warn)
-                }
-                Some(Status::Done) if picks.iter().any(|p| p.status == Status::NeedsChoice) => ("Choose the piece to keep".into(), palette.warn),
-                Some(Status::Done) => match picks.iter().find(|p| p.status == Status::Done).and_then(|p| p.outputs.first()) {
-                    Some(kept) => (format!("keeps {} bp · {} pieces", thousands(kept.doc.len()), result.map_or(0, |r| r.outputs.len())), palette.muted),
-                    None => (picks.iter().find_map(|p| p.error.as_ref()).map(short_problem).unwrap_or_default(), palette.error),
-                },
-                Some(Status::Failed) => (problem(), palette.error),
-                _ => ("waits for the step above".into(), palette.faint),
-            };
-            ("CUT".into(), enzymes, line, color)
-        }
-        Kind::Copy => {
-            let Some(Action::Amplify(params)) = c.step.map(|s| &tab.protocol.steps[s].action) else { return Default::default() };
-            let object = match params.region.as_deref() {
-                Some(part) => format!("{part} by PCR"),
-                None => "by PCR".to_string(),
-            };
-            let tails = params.enzymes();
-            let (line, color) = match status {
-                Some(Status::NeedsChoice) => ("Mark the part to copy".into(), palette.warn),
-                Some(Status::Done) => {
-                    let size = result.and_then(|r| r.outputs.first()).map(|p| format!("{} bp product", thousands(p.doc.len()))).unwrap_or_default();
-                    match tails.as_slice() {
-                        [] => (format!("{size} · choose the tail enzymes"), palette.warn),
-                        list => (format!("{size} · {} tails", list.join(" + ")), palette.muted),
-                    }
-                }
-                Some(Status::Failed) => (problem(), palette.error),
-                _ => ("waits for the step above".into(), palette.faint),
-            };
-            ("COPY".into(), object, line, color)
-        }
-        Kind::Join => {
-            // The other plasmids of the tube are counted, as the card may not have room for all.
-            let others = match result.map_or(0, |r| r.findings.byproducts.len()) {
-                0 => String::new(),
-                n => format!(" · {n} more can form"),
-            };
-            let (line, color) = match status {
-                Some(Status::Done) => {
-                    let made = result.and_then(|r| r.outputs.first());
-                    let shape = made.map_or("", |p| if p.doc.is_circular() { "circular" } else { "linear" });
-                    (made.map(|p| format!("{} bp · {shape}{others}", thousands(p.doc.len()))).unwrap_or_default(), palette.muted)
-                }
-                Some(Status::NeedsChoice) => (format!("Choose the direction{others}"), palette.warn),
-                Some(Status::Failed) => (problem(), palette.error),
-                _ => ("waits for the pieces".into(), palette.faint),
-            };
-            ("JOIN".into(), "new plasmid".into(), line, color)
-        }
-        Kind::Other => {
-            let step = c.step.map(|s| &tab.protocol.steps[s]);
-            let title = step.map(|s| s.action.title().to_uppercase()).unwrap_or_default();
-            let line = status.map(|s| s.name().to_string()).unwrap_or_default();
-            (title, step.map(|s| s.id.clone()).unwrap_or_default(), line, status.map_or(palette.faint, |s| status_color(s, palette)))
-        }
-        Kind::Start => ("START".into(), "with a plasmid".into(), String::new(), palette.muted),
-        Kind::PutInto => {
-            // When a plasmid on the bench can already take the kept piece, the card says a drag
-            // does the same as choosing here.
-            let pick = board.cards.iter().find_map(|other| carried_by(tab, other));
-            let droppable = pick.is_some_and(|pick| (0..board.cards.len()).any(|ii| drop_onto(tab, board, ii, pick).is_some()));
-            let line = match (droppable, pick.is_some()) {
-                (true, _) => "or drag the green piece onto a plasmid",
-                (false, true) => "that the green piece goes into",
-                (false, false) => "that the kept piece goes into",
-            };
-            ("PUT IT INTO".into(), "a plasmid".into(), line.into(), palette.faint)
-        }
-        Kind::AddPlasmid => ("ADD".into(), "another plasmid".into(), "to cut a piece from".into(), palette.faint),
-    }
+    } else {
+        text.line
+    };
+    (text.verb, text.object, line, tone_color(text.tone, palette))
 }
 
 /// A kept piece carried across the bench by a drag: the pick step that keeps it.
@@ -2536,43 +1925,8 @@ fn draw_link(
     // What happens on the way, as pills at the middle of the arrow. A cut's pill leads to the
     // plasmid's map, where its enzymes are chosen. A treatment's pill shows the treatment, and its
     // right-click leaves it out.
-    enum Pill {
-        Cut(usize),
-        Copy(usize),
-        Treatment(usize),
-    }
-    let mut pills: Vec<(String, Color32, Pill)> = Vec::new();
-    if board.cards[link.to].kind == Kind::Cut
-        && let Some(Action::Digest(params)) = board.cards[link.to].step.map(|s| &tab.protocol.steps[s].action)
-        && let Some(from) = board.cards[link.from].step
-    {
-        // The cut after a PCR trims the tails, and its enzymes are chosen on the PCR step.
-        let trims = board.cards[link.from].kind == Kind::Copy;
-        let text = match (params.enzymes.is_empty(), trims) {
-            (true, true) => "trim the tails: choose enzymes".to_string(),
-            (true, false) => "cut: choose enzymes".to_string(),
-            (false, true) => format!("trim the tails with {}", params.enzymes.join(" + ")),
-            (false, false) => format!("cut with {}", params.enzymes.join(" + ")),
-        };
-        let color = if params.enzymes.is_empty() { palette.warn } else { palette.ink };
-        pills.push((text, color, if trims { Pill::Copy(from) } else { Pill::Cut(from) }));
-    }
-    if board.cards[link.to].kind == Kind::Copy
-        && let Some(copy) = board.cards[link.to].step
-        && let Action::Amplify(params) = &tab.protocol.steps[copy].action
-    {
-        let tails = params.enzymes();
-        let text = if tails.is_empty() { "PCR: choose the tail enzymes".to_string() } else { format!("PCR with {} tails", tails.join(" + ")) };
-        pills.push((text, if tails.is_empty() { palette.warn } else { palette.ink }, Pill::Copy(copy)));
-    }
-    for &step in &link.treatments {
-        let text = match tab.protocol.steps[step].action {
-            Action::Dephosphorylate(_) => "no 5' phosphates",
-            Action::Flip(_) => "turned round",
-            _ => continue,
-        };
-        pills.push((text.to_string(), palette.muted, Pill::Treatment(step)));
-    }
+    let pills: Vec<(String, Color32, PillTarget)> =
+        bench::link_pills(&tab.protocol, board, link).into_iter().map(|p| (p.text, tone_color(p.tone, palette), p.target)).collect();
     let middle = if (start.x - end.x).abs() < 1.0 { pos2(start.x, (start.y + end.y) / 2.0) } else { pos2((start.x + end.x) / 2.0, (start.y + end.y) / 2.0) };
     let font = style::ui_font(11.0 * scale.min(1.2));
     for (ii, (text, color, what)) in pills.iter().enumerate() {
@@ -2590,19 +1944,19 @@ fn draw_link(
             ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
         }
         match what {
-            Pill::Cut(plasmid) => {
+            PillTarget::Cut(plasmid) => {
                 if response.clicked() {
                     edits.push(Edit::Zoom(Some(*plasmid)));
                 }
                 response.on_hover_text("Click to choose the enzymes on the plasmid's map");
             }
-            Pill::Copy(copy) => {
+            PillTarget::Copy(copy) => {
                 if response.clicked() {
                     edits.push(Edit::Zoom(Some(*copy)));
                 }
                 response.on_hover_text("Click to see the primers on the map and choose the enzymes for their tails");
             }
-            Pill::Treatment(step) => {
+            PillTarget::Treatment(step) => {
                 if response.clicked() {
                     edits.push(Edit::Select(*step));
                 }

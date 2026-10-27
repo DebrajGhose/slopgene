@@ -4,6 +4,7 @@
 //! [`svg::to_svg`] for files, and the desktop app paints the same scene with egui, so maps look
 //! the same everywhere.
 
+pub mod bench;
 pub mod circular;
 pub mod linear;
 pub mod ring;

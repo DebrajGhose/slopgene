@@ -160,6 +160,7 @@ The JSON is the run's JSON with `changed`, a few words on what changed, and `sav
 | Keep a pair of the primers a PCR designed | `slopgene protocol primers clone.json pcr_donor --pair 1` |
 | Use primers of your own, or design them anew on each run | `slopgene protocol primers clone.json pcr_donor --fwd TAAGCAGAATTC... --rev ...`, `--clear` |
 | Aim the primer design at a melting temperature | `slopgene protocol primers clone.json pcr_donor --tm 58` |
+| Draw the bench as a picture | `slopgene protocol render clone.json -o clone.png` |
 
 `add` gives its steps new ids, such as `donor_2`, `cut_donor_2` and `insert_2`.
 Without `-e`, the new cut waits for its enzymes.
@@ -174,6 +175,8 @@ New enzymes on a vector's cut carry over to the PCRs whose tails had the same en
 `--fwd` and `--rev` give two primers of your own, written 5' to 3' with their tails, and `--clear` designs them anew on each run.
 `--tm` sets the melting temperature the design aims for, for the part of each primer that anneals, 60 °C unless set, and designs the primers anew at it, or with `--pair` keeps a pair designed at it.
 `protocol new --pcr --tm 58` sets it from the start.
+`render` draws the protocol as the bench the app shows: each map as a small ring with its features, its cut under it with the piece kept in green and the rest in grey, a PCR as its product, and the join with the new plasmid, with the enzymes and treatments written on the arrows.
+`-o` names an .svg or .png file (by default the protocol's name with .svg), and `--dark` and `--scale` work as for `slopgene render`.
 `put --into` a map cuts that map with the piece's own enzymes, so the ends match.
 It keeps the map's largest piece as the backbone, takes its 5' phosphates off, and adds a join of the two.
 `--keep-phosphates` leaves the phosphates on.

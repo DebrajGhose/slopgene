@@ -23,6 +23,7 @@ use slopgene_core::enzymes::{Enzyme, EnzymeDb, find_sites};
 use slopgene_core::io::{self, Format};
 use slopgene_core::primers::{self, BindingRules, TmConditions};
 use slopgene_core::protocol::{self, Change, NewFile, Orientation, Protocol, Run};
+use slopgene_core::render::bench::{BenchOptions, render_bench};
 use slopgene_core::render::{self, ApproxMeasure, MapOptions, Theme};
 use slopgene_core::search::{find_dna, find_protein};
 use slopgene_core::translate::{GeneticCode, OrfOptions, find_orfs, translate, translate_feature};
@@ -671,6 +672,8 @@ fn register_protocols(engine: &mut Engine) {
     });
     engine.register_fn("protocol_copy_out", |path: &str, step: &str| -> R<Dynamic> { change_protocol(path, Change::CopyOut { step: step.into() }) });
     engine.register_fn("protocol_cut_out", |path: &str, step: &str| -> R<Dynamic> { change_protocol(path, Change::CutOut { step: step.into() }) });
+    engine.register_fn("protocol_render", |path: &str, out: &str| -> R<Dynamic> { protocol_render(path, out, Map::new()) });
+    engine.register_fn("protocol_render", |path: &str, out: &str, options: Map| -> R<Dynamic> { protocol_render(path, out, options) });
     engine.register_fn("protocol_primers", |path: &str, step: &str, options: Map| -> R<Dynamic> {
         // A pair number keeps one of the pairs the run designs, forward and reverse give two
         // primers of one's own, tm aims the design at a melting temperature, and clear designs
@@ -752,6 +755,19 @@ fn protocol_new(path: &str, vector: &str, insert: &str, options: Map) -> R<Dynam
     let path = PathBuf::from(path);
     let (plan, ran) = core(protocol::write_new(&path, &new, flag_option(&options, "force"), db()))?;
     Ok(run_value(&path, &plan, &ran, None))
+}
+
+/// Draw a protocol file as the bench the app shows and write it as SVG or PNG, by the extension
+/// of `out`. Options: `dark`, and `scale` (the pixel density of a PNG, 2 unless set).
+fn protocol_render(path: &str, out: &str, options: Map) -> R<Dynamic> {
+    let path = PathBuf::from(path);
+    let (plan, ran) = core(protocol::run_file(&path, db()))?;
+    let bench = if flag_option(&options, "dark") { BenchOptions::dark() } else { BenchOptions::default() };
+    let scene = render_bench(&plan, &ran, &bench, &ApproxMeasure);
+    let scale = number_option(&options, "scale")?.unwrap_or(2.0) as f32;
+    let target = PathBuf::from(out);
+    files::save_scene(&scene, &target, scale).map_err(|e| e.to_string())?;
+    Ok(to_dyn(serde_json::json!({ "output": target.to_string_lossy().replace('\\', "/"), "width": scene.width, "height": scene.height })))
 }
 
 /// Add a map to cut a piece from, or with `pcr` to copy a piece from. Options: `cut_out` (the
