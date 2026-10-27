@@ -7,12 +7,13 @@ Everything the desktop app does, the `slopgene` command line and its scripts do 
 ## Download
 
 <p>
-  <a href="https://github.com/DebrajGhose/slopgene/releases/latest/download/SlopGene-windows-setup.exe"><img src="docs/images/download-windows.svg" alt="Download for Windows: setup program (.exe)" height="56"></a>
-  <a href="https://github.com/DebrajGhose/slopgene/releases/latest/download/SlopGene-macos.dmg"><img src="docs/images/download-macos.svg" alt="Download for macOS: disk image (.dmg)" height="56"></a>
-  <a href="https://github.com/DebrajGhose/slopgene/releases/latest/download/SlopGene-linux.deb"><img src="docs/images/download-linux-deb.svg" alt="Download for Linux: Debian package (.deb)" height="56"></a>
-  <a href="https://github.com/DebrajGhose/slopgene/releases/latest/download/SlopGene-linux.AppImage"><img src="docs/images/download-linux-appimage.svg" alt="Download for Linux: AppImage" height="56"></a>
+  <a href="https://github.com/DebrajGhose/slopgene/releases/latest/download/SlopGene-windows-setup.exe"><img src="https://img.shields.io/github/v/release/DebrajGhose/slopgene?style=flat-square&labelColor=515faa&color=2b2d33&label=Windows%20setup%20.exe" alt="Download for Windows: setup program (.exe), newest release" height="40"></a>
+  <a href="https://github.com/DebrajGhose/slopgene/releases/latest/download/SlopGene-macos.dmg"><img src="https://img.shields.io/github/v/release/DebrajGhose/slopgene?style=flat-square&labelColor=515faa&color=2b2d33&label=macOS%20.dmg" alt="Download for macOS: disk image (.dmg), newest release" height="40"></a>
+  <a href="https://github.com/DebrajGhose/slopgene/releases/latest/download/SlopGene-linux.deb"><img src="https://img.shields.io/github/v/release/DebrajGhose/slopgene?style=flat-square&labelColor=515faa&color=2b2d33&label=Linux%20.deb" alt="Download for Linux: Debian package (.deb), newest release" height="40"></a>
+  <a href="https://github.com/DebrajGhose/slopgene/releases/latest/download/SlopGene-linux.AppImage"><img src="https://img.shields.io/github/v/release/DebrajGhose/slopgene?style=flat-square&labelColor=515faa&color=2b2d33&label=Linux%20AppImage" alt="Download for Linux: AppImage, newest release" height="40"></a>
 </p>
 
+Each button names the version it downloads, which is the newest release.
 Each download installs the desktop app and the `slopgene` command line.
 The installers are not code-signed, so Windows and macOS warn before the first start, and [The first start](#the-first-start) says which button to press.
 Older versions, the plain archives and the checksums are on the [releases page](https://github.com/DebrajGhose/slopgene/releases).

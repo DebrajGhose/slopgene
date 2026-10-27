@@ -69,7 +69,8 @@
     .downloads a:hover { filter: brightness(1.08); }
     .downloads strong { display: block; font-size: 1.05rem; }
     .downloads span { display: block; font-size: 0.85rem; opacity: 0.88; margin-top: 2px; }
-    .downloads em { display: block; font-style: normal; font-size: 0.8rem; margin-top: 6px; opacity: 0.95; }
+    .downloads em { display: block; font-style: normal; font-size: 0.8rem; margin-top: 2px; opacity: 0.95; }
+    .downloads b { display: block; font-size: 0.8rem; font-weight: 600; margin-top: 6px; }
     .downloads .mine a { box-shadow: 0 0 0 3px var(--bg), 0 0 0 5px var(--accent); }
     .small { color: var(--muted); font-size: 0.92rem; }
     figure { margin: 0 0 8px; }
@@ -96,10 +97,10 @@
   <p class="tagline">A free, open-source and scriptable plasmid and sequence editor for Windows, macOS and Linux.</p>
 
   <ul class="downloads" id="downloads">
-    <li data-os="windows"><a href="https://github.com/DebrajGhose/slopgene/releases/latest/download/SlopGene-windows-setup.exe"><strong>Windows</strong><span>setup program, .exe</span></a></li>
-    <li data-os="macos"><a href="https://github.com/DebrajGhose/slopgene/releases/latest/download/SlopGene-macos.dmg"><strong>macOS</strong><span>disk image, .dmg</span></a></li>
-    <li data-os="linux"><a href="https://github.com/DebrajGhose/slopgene/releases/latest/download/SlopGene-linux.deb"><strong>Linux</strong><span>Debian and Ubuntu, .deb</span></a></li>
-    <li data-os="linux"><a href="https://github.com/DebrajGhose/slopgene/releases/latest/download/SlopGene-linux.AppImage"><strong>Linux</strong><span>other distributions, AppImage</span></a></li>
+    <li data-os="windows"><a href="https://github.com/DebrajGhose/slopgene/releases/latest/download/SlopGene-windows-setup.exe"><strong>Windows</strong><span>setup program, .exe</span><b class="version">newest release</b></a></li>
+    <li data-os="macos"><a href="https://github.com/DebrajGhose/slopgene/releases/latest/download/SlopGene-macos.dmg"><strong>macOS</strong><span>disk image, .dmg</span><b class="version">newest release</b></a></li>
+    <li data-os="linux"><a href="https://github.com/DebrajGhose/slopgene/releases/latest/download/SlopGene-linux.deb"><strong>Linux</strong><span>Debian and Ubuntu, .deb</span><b class="version">newest release</b></a></li>
+    <li data-os="linux"><a href="https://github.com/DebrajGhose/slopgene/releases/latest/download/SlopGene-linux.AppImage"><strong>Linux</strong><span>other distributions, AppImage</span><b class="version">newest release</b></a></li>
   </ul>
   <p><a href="https://github.com/DebrajGhose/slopgene">SlopGene on GitHub</a>: source code, documentation and older versions.</p>
 
@@ -137,6 +138,18 @@ protocol_new("clone.json", "pDoom.dna", "pGFP.dna", #{ cut_out: "GFP", enzymes: 
         item.querySelector("a").appendChild(tag);
         list.insertBefore(item, list.firstChild);
       });
+    }
+    // The version each button downloads, from the newest release, when GitHub answers.
+    if (window.fetch) {
+      fetch("https://api.github.com/repos/DebrajGhose/slopgene/releases/latest")
+        .then(function (response) { return response.ok ? response.json() : null; })
+        .then(function (release) {
+          if (!release || !release.tag_name) { return; }
+          var version = String(release.tag_name).replace(/^v/, "");
+          var chips = document.querySelectorAll("#downloads .version");
+          Array.prototype.forEach.call(chips, function (chip) { chip.textContent = "version " + version; });
+        })
+        .catch(function () {});
     }
   })();
 </script>
