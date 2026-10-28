@@ -1,20 +1,36 @@
-//! Primer design: primer pairs that amplify a region, ranked, and 5' tails for cloning.
+//! Primer design after Primer3: primer pairs that amplify a region, judged and ranked as Primer3
+//! judges and ranks them, and 5' tails for cloning.
 //!
 //! Each primer anneals with its 3' end toward the region it copies. The designer tries every
-//! start and length allowed on each side, scores each candidate, and pairs the best of them.
-//! A candidate's penalty adds up, in degrees or in comparable steps:
+//! start and length allowed on each side and holds each candidate to Primer3's rules
+//! (Untergasser et al. 2012, Koressaar and Remm 2007), with Primer3's default limits and weights
+//! unless [`DesignOptions`] says otherwise:
 //!
-//! - the distance of its melting temperature from the target,
-//! - GC content outside 40 to 60%,
-//! - a 3' end without a G or C clamp, or with more than three G/C among its last five bases,
-//! - a 3' end that pairs with another copy of the primer, a hairpin, a run of one base,
-//! - each other place on the template where it would also anneal.
+//! - its melting temperature, by SantaLucia's (1998) nearest-neighbour model with Primer3's salt
+//!   correction and conditions, must lie within a window around the target, 57 to 63 °C by
+//!   default;
+//! - its GC content must lie between 20 and 80%;
+//! - no base may repeat more than five times in a row;
+//! - it must not pair with itself: Primer3's alignment score of the primer against its own
+//!   reverse complement may not exceed 8 anywhere, and may not exceed 3 for an alignment that
+//!   ends at its 3' end, which is the primer-dimer test;
+//! - it may anneal nowhere else on the template, SlopGene's own check in place of Primer3's
+//!   mispriming libraries.
 //!
-//! A pair adds the difference between its two melting temperatures and how well the two
-//! primers' 3' ends pair with each other. Temperatures are those of the annealing part only, as
-//! a tail does not pair with the template in the first cycles. The weights follow the usual
-//! rules of thumb (Primer3's defaults and the guidance of polymerase suppliers): close Tm first,
-//! then a clean 3' end.
+//! Among the candidates that pass, Primer3's penalty ranks them: one point per degree from the
+//! target temperature and one per base from the optimum length of 20, the other weights being
+//! zero by default. A pair must also pass the same two alignment tests between its primers, and
+//! its penalty is the sum of its primers' penalties. When no candidate passes every test, the
+//! designer still answers, as Primer3 does when told to pick anyway: it takes the candidates that
+//! break the fewest rules, with the rules they break written out as warnings.
+//!
+//! Temperatures and GC content are those of the annealing part only, as a tail does not pair with
+//! the template in the first cycles. The pairing tests use the whole primer, tail included, as
+//! Primer3 does with its overhangs.
+//!
+//! Primer3's thermodynamic model of hairpins and dimers (its `_TH` settings) is not part of this.
+//! The pairing tests are Primer3's alignment scores, which it used before that model and still
+//! offers.
 //!
 //! Tails for cloning are made here too: a restriction site with a few spare bases in front of it
 //! (so the enzyme can cut near the end of the product), a Golden Gate site that leaves a chosen
@@ -25,7 +41,7 @@ use crate::alphabet::{self, revcomp};
 use crate::enzymes::{Enzyme, find_sites};
 use crate::error::{Error, Result};
 use crate::model::{Document, Primer, Strand};
-use crate::primers::{BindingRules, TmConditions, analyze, find_binding_sites, melting_temperature};
+use crate::primers::{self, BindingRules, TmConditions, find_binding_sites, melting_temperature};
 use crate::span::Span;
 
 /// Spare bases put in front of a restriction site so the enzyme can cut near the end of a PCR
@@ -33,14 +49,110 @@ use crate::span::Span;
 /// not pair with itself.
 pub const SITE_PADDING: &[u8] = b"TAAGCA";
 
+/// The limits a primer must keep, Primer3's by default.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Limits {
+    /// How far the melting temperature may lie from the target, in degrees. Primer3 allows 57 to
+    /// 63 °C around its 60.
+    pub tm_window: f64,
+    /// GC content, in percent.
+    pub min_gc: f64,
+    pub max_gc: f64,
+    /// The longest run of one base.
+    pub max_poly_x: usize,
+    /// G or C bases required at the very 3' end.
+    pub gc_clamp: usize,
+    /// The most G or C among the last five bases.
+    pub max_end_gc: usize,
+    /// Primer3's alignment score of a primer against its own reverse complement, anywhere.
+    pub max_self_any: f64,
+    /// The same score for an alignment that ends at the primer's 3' end.
+    pub max_self_end: f64,
+    /// The same two scores between the two primers of a pair.
+    pub max_pair_any: f64,
+    pub max_pair_end: f64,
+    /// The stability of the last five bases, in kcal/mol. Primer3 does not limit it (100).
+    pub max_end_stability: f64,
+    /// How far apart the two primers' melting temperatures may be. Primer3 does not limit it
+    /// (100).
+    pub max_tm_difference: f64,
+    /// How many other places on the template a primer may anneal at.
+    pub max_other_sites: usize,
+}
+
+impl Default for Limits {
+    fn default() -> Self {
+        Limits {
+            tm_window: 3.0,
+            min_gc: 20.0,
+            max_gc: 80.0,
+            max_poly_x: 5,
+            gc_clamp: 0,
+            max_end_gc: 5,
+            max_self_any: 8.0,
+            max_self_end: 3.0,
+            max_pair_any: 8.0,
+            max_pair_end: 3.0,
+            max_end_stability: 100.0,
+            max_tm_difference: 100.0,
+            max_other_sites: 0,
+        }
+    }
+}
+
+/// Primer3's penalty weights: what each fault costs. Only the temperature and the length count by
+/// default.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Weights {
+    /// Per degree below and above the target melting temperature.
+    pub tm_below: f64,
+    pub tm_above: f64,
+    /// Per base below and above the optimum length.
+    pub size_below: f64,
+    pub size_above: f64,
+    /// Per percent of GC below and above the optimum.
+    pub gc_below: f64,
+    pub gc_above: f64,
+    /// Per point of the two self-pairing scores and per kcal/mol of 3' end stability.
+    pub self_any: f64,
+    pub self_end: f64,
+    pub end_stability: f64,
+    /// Per degree between the two primers of a pair, and per point of their pairing scores.
+    pub pair_tm_difference: f64,
+    pub pair_any: f64,
+    pub pair_end: f64,
+}
+
+impl Default for Weights {
+    fn default() -> Self {
+        Weights {
+            tm_below: 1.0,
+            tm_above: 1.0,
+            size_below: 1.0,
+            size_above: 1.0,
+            gc_below: 0.0,
+            gc_above: 0.0,
+            self_any: 0.0,
+            self_end: 0.0,
+            end_stability: 0.0,
+            pair_tm_difference: 0.0,
+            pair_any: 0.0,
+            pair_end: 0.0,
+        }
+    }
+}
+
 /// How the designer chooses primers.
 #[derive(Clone, Debug, PartialEq)]
 pub struct DesignOptions {
     /// The melting temperature to aim for (deg C), for the annealing part of each primer.
     pub target_tm: f64,
-    /// Shortest and longest annealing part, in bases.
+    /// Shortest, best and longest annealing part, in bases.
     pub min_len: usize,
+    pub opt_len: usize,
     pub max_len: usize,
+    /// The GC content to aim for, in percent. It counts only with a weight on it.
+    pub opt_gc: f64,
     /// How far outside the region a primer may start. 0 amplifies exactly the region; more lets
     /// the designer move each primer outward by up to this many bases to find a better one.
     pub flank: usize,
@@ -50,6 +162,8 @@ pub struct DesignOptions {
     pub conditions: TmConditions,
     /// How many pairs to return, best first.
     pub count: usize,
+    pub limits: Limits,
+    pub weights: Weights,
 }
 
 /// The melting temperature a design aims for unless told another, in degrees Celsius.
@@ -60,12 +174,16 @@ impl Default for DesignOptions {
         DesignOptions {
             target_tm: DEFAULT_TARGET_TM,
             min_len: 18,
-            max_len: 30,
+            opt_len: 20,
+            max_len: 27,
+            opt_gc: 50.0,
             flank: 0,
             forward_tail: Vec::new(),
             reverse_tail: Vec::new(),
             conditions: TmConditions::default(),
             count: 5,
+            limits: Limits::default(),
+            weights: Weights::default(),
         }
     }
 }
@@ -84,11 +202,17 @@ pub struct Candidate {
     /// Melting temperature of the annealing part.
     pub tm: f64,
     pub gc_percent: f64,
+    /// Primer3's alignment scores of the whole primer against its own reverse complement:
+    /// anywhere, and ending at its 3' end.
+    pub self_any: f64,
+    pub self_end: f64,
+    /// Primer3's stability of the last five bases, in kcal/mol.
+    pub end_stability: f64,
     /// Other places on the template where the primer would also anneal.
     pub other_sites: usize,
-    /// What a person should know about it, in a few words each.
+    /// The rules it breaks, in a few words each. Empty for a primer Primer3 would accept.
     pub warnings: Vec<String>,
-    /// The sum of its faults; lower is better.
+    /// Primer3's penalty: the sum of its faults, weighted. Lower is better.
     pub penalty: f64,
 }
 
@@ -114,9 +238,12 @@ pub struct PrimerPair {
     pub amplified: Span,
     /// Length of the product, tails included.
     pub product_len: usize,
-    /// Longest stretch where one primer's 3' end pairs with the other primer.
-    pub cross_dimer: usize,
+    /// Primer3's alignment scores between the two primers: anywhere, and ending at either 3' end.
+    pub compl_any: f64,
+    pub compl_end: f64,
+    /// The rules the pair breaks between its primers. Each primer's own are in it.
     pub warnings: Vec<String>,
+    /// Primer3's pair penalty: both primers' penalties, plus the pair's weighted faults.
     pub penalty: f64,
 }
 
@@ -138,83 +265,100 @@ impl PrimerPair {
         reverse.description = describe(&self.reverse);
         (forward, reverse)
     }
+
+    /// How many rules the pair and its primers break together.
+    fn faults(&self) -> usize {
+        self.forward.warnings.len() + self.reverse.warnings.len() + self.warnings.len()
+    }
 }
 
 /// How many of the best candidates on each side are checked for other binding sites and paired.
 const SHORTLIST: usize = 40;
 
-/// The fault score of one primer, with its warnings. `annealing` is the part that pairs with the
-/// template; `full` includes the tail, since a tail can fold back or pair with itself too.
-fn judge(full: &[u8], annealing: &[u8], options: &DesignOptions) -> (f64, f64, f64, Vec<String>) {
-    let report = analyze(full, &options.conditions);
+/// What the judge finds about one primer.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct Judged {
+    pub tm: f64,
+    pub gc_percent: f64,
+    pub self_any: f64,
+    pub self_end: f64,
+    pub end_stability: f64,
+    pub penalty: f64,
+    pub warnings: Vec<String>,
+}
+
+/// The longest run of one base in `seq`.
+fn longest_run(seq: &[u8]) -> usize {
+    let mut longest = 0;
+    let mut run = 0;
+    for ii in 0..seq.len() {
+        run = if ii > 0 && seq[ii].eq_ignore_ascii_case(&seq[ii - 1]) { run + 1 } else { 1 };
+        longest = longest.max(run);
+    }
+    longest
+}
+
+/// Judge one primer by Primer3's rules. `annealing` is the part that pairs with the template,
+/// which sets the temperature and the GC content. `full` includes the tail, since a tail can
+/// pair with the primer or with the other primer too. The penalty is Primer3's, and the warnings
+/// name every limit the primer breaks.
+pub(crate) fn judge(full: &[u8], annealing: &[u8], options: &DesignOptions) -> Judged {
+    let limits = &options.limits;
+    let weights = &options.weights;
     let tm = melting_temperature(annealing, &options.conditions);
     let gc_percent = alphabet::gc_fraction(annealing) * 100.0;
-    let mut penalty = (tm - options.target_tm).abs();
+    let self_any = primers::self_any(full);
+    let self_end = primers::self_end(full);
+    let end_stability = primers::end_stability(annealing);
+    let len = annealing.len();
+
+    // Primer3's penalty: each fault times its weight, above or below the optimum.
+    let mut penalty = if tm < options.target_tm { weights.tm_below * (options.target_tm - tm) } else { weights.tm_above * (tm - options.target_tm) };
+    penalty += if len < options.opt_len { weights.size_below * (options.opt_len - len) as f64 } else { weights.size_above * (len - options.opt_len) as f64 };
+    penalty += if gc_percent < options.opt_gc { weights.gc_below * (options.opt_gc - gc_percent) } else { weights.gc_above * (gc_percent - options.opt_gc) };
+    penalty += weights.self_any * self_any + weights.self_end * self_end + weights.end_stability * end_stability;
+
+    // The limits, each written out when broken.
     let mut warnings = Vec::new();
-
-    // GC content outside the comfortable range.
-    if gc_percent < 40.0 {
-        penalty += (40.0 - gc_percent) * 0.2;
-    } else if gc_percent > 60.0 {
-        penalty += (gc_percent - 60.0) * 0.2;
+    let (min_tm, max_tm) = (options.target_tm - limits.tm_window, options.target_tm + limits.tm_window);
+    if tm < min_tm {
+        warnings.push(format!("Tm {tm:.1} °C is below {min_tm:.0}"));
+    } else if tm > max_tm {
+        warnings.push(format!("Tm {tm:.1} °C is above {max_tm:.0}"));
     }
-    if !(30.0..=70.0).contains(&gc_percent) {
-        warnings.push(format!("GC {gc_percent:.0}%"));
+    if gc_percent < limits.min_gc {
+        warnings.push(format!("GC {gc_percent:.0}% is below {:.0}%", limits.min_gc));
+    } else if gc_percent > limits.max_gc {
+        warnings.push(format!("GC {gc_percent:.0}% is above {:.0}%", limits.max_gc));
     }
-
-    // The 3' end: one G or C as the last base helps the polymerase start; more than three among
-    // the last five makes the end sticky enough to start in the wrong places.
-    let last = annealing.last().copied().unwrap_or(b'A').to_ascii_uppercase();
-    if !matches!(last, b'G' | b'C') {
-        penalty += 1.0;
+    let run = longest_run(annealing);
+    if run > limits.max_poly_x {
+        warnings.push(format!("a run of {run} identical bases, more than {}", limits.max_poly_x));
     }
-    let tail_gc = annealing[annealing.len().saturating_sub(5)..].iter().filter(|b| matches!(b.to_ascii_uppercase(), b'G' | b'C')).count();
-    if tail_gc > 3 {
-        penalty += 2.0 * (tail_gc - 3) as f64;
-        warnings.push(format!("{tail_gc} G/C in the last 5 bases"));
+    let last_five = &annealing[len.saturating_sub(5)..];
+    let is_gc = |b: &u8| matches!(b.to_ascii_uppercase(), b'G' | b'C');
+    if limits.gc_clamp > 0 && !annealing[len.saturating_sub(limits.gc_clamp)..].iter().all(is_gc) {
+        warnings.push(format!("fewer than {} G or C at the 3' end", limits.gc_clamp));
     }
-
-    // Pairing with itself: a 3' end that pairs can be extended into a primer dimer, and a hairpin
-    // hides the primer from its template.
-    if report.three_prime_dimer >= 4 {
-        penalty += 2.0 * (report.three_prime_dimer - 3) as f64;
-        warnings.push(format!("3' end pairs with itself over {} bases", report.three_prime_dimer));
+    let end_gc = last_five.iter().filter(|b| is_gc(b)).count();
+    if end_gc > limits.max_end_gc {
+        warnings.push(format!("{end_gc} G or C among the last five bases, more than {}", limits.max_end_gc));
     }
-    if report.hairpin_stem >= 4 {
-        penalty += 2.0 * (report.hairpin_stem - 3) as f64;
-        warnings.push(format!("hairpin with a {}-base stem", report.hairpin_stem));
+    if self_any > limits.max_self_any {
+        warnings.push(format!("pairs with itself (score {self_any:.1}, limit {:.0})", limits.max_self_any));
     }
-    if report.longest_run >= 5 {
-        penalty += 2.0 * (report.longest_run - 4) as f64;
-        warnings.push(format!("run of {} identical bases", report.longest_run));
+    if self_end > limits.max_self_end {
+        warnings.push(format!("its 3' end pairs with itself (score {self_end:.1}, limit {:.0})", limits.max_self_end));
     }
-    (penalty, tm, gc_percent, warnings)
-}
-
-/// The longest stretch ending at `a`'s 3' base that pairs with any part of `b`. Such a stretch
-/// lets the polymerase extend `a` on `b`, which makes primer dimers.
-pub fn three_prime_pairing(a: &[u8], b: &[u8]) -> usize {
-    let a = alphabet::upper(a);
-    let b_rc = revcomp(&alphabet::upper(b));
-    let mut best = 0;
-    // ii = where in b's reverse complement the run that ends at a's last base ends.
-    for ii in 0..b_rc.len() {
-        let mut run = 0;
-        while run < a.len() && run <= ii && a[a.len() - 1 - run] == b_rc[ii - run] {
-            run += 1;
-        }
-        best = best.max(run);
+    if end_stability > limits.max_end_stability {
+        warnings.push(format!("3' end stability {end_stability:.1} kcal/mol, more than {:.1}", limits.max_end_stability));
     }
-    best
-}
-
-/// The longest stretch at either primer's 3' end that pairs with the other primer.
-pub fn cross_dimer(a: &[u8], b: &[u8]) -> usize {
-    three_prime_pairing(a, b).max(three_prime_pairing(b, a))
+    Judged { tm, gc_percent, self_any, self_end, end_stability, penalty, warnings }
 }
 
 /// Every forward-primer candidate for `region`: starts from `flank` bases before the region to
-/// its first base, each length allowed, scored but not yet checked for other sites.
+/// its first base, each length allowed, judged but not yet checked for other sites. Reverse
+/// primers likewise, from the region's last base outward.
 fn side_candidates(doc: &Document, region: Span, forward: bool, options: &DesignOptions) -> Vec<Candidate> {
     let len = doc.len();
     let circular = doc.is_circular();
@@ -258,33 +402,37 @@ fn side_candidates(doc: &Document, region: Span, forward: bool, options: &Design
             let mut full = tail.clone();
             full.extend_from_slice(&annealing);
             let full = alphabet::upper(&full);
-            let (penalty, tm, gc_percent, warnings) = judge(&full, &annealing, options);
+            let judged = judge(&full, &annealing, options);
             found.push(Candidate {
                 seq: full,
                 tail_len: tail.len(),
                 site,
                 strand: if forward { Strand::Forward } else { Strand::Reverse },
-                tm,
-                gc_percent,
+                tm: judged.tm,
+                gc_percent: judged.gc_percent,
+                self_any: judged.self_any,
+                self_end: judged.self_end,
+                end_stability: judged.end_stability,
                 other_sites: 0,
-                warnings,
-                penalty: penalty + 0.05 * shift as f64,
+                warnings: judged.warnings,
+                // A primer moved outward costs a little, so the tightest product wins ties.
+                penalty: judged.penalty + 0.05 * shift as f64,
             });
         }
     }
-    found.sort_by(|a, b| a.penalty.total_cmp(&b.penalty));
+    found.sort_by(|a, b| (a.warnings.len(), a.penalty).partial_cmp(&(b.warnings.len(), b.penalty)).unwrap_or(std::cmp::Ordering::Equal));
     found
 }
 
-/// Count the places besides its own where a candidate's annealing part binds the template, and
-/// add them to its penalty. Primers that start in the wrong place give extra products.
-fn check_other_sites(doc: &Document, candidate: &mut Candidate) {
+/// Count the places besides its own where a candidate's annealing part binds the template.
+/// Primers that start in the wrong place give extra products, so more than the limit allows is
+/// a fault.
+fn check_other_sites(doc: &Document, candidate: &mut Candidate, limits: &Limits) {
     let rules = BindingRules { min_tm: 35.0, ..BindingRules::default() };
     let sites = find_binding_sites(&doc.seq, doc.is_circular(), candidate.annealing(), &rules);
     let others = sites.iter().filter(|b| !(b.strand == candidate.strand && b.span == candidate.site)).count();
     candidate.other_sites = others;
-    if others > 0 {
-        candidate.penalty += 5.0 * others as f64;
+    if others > limits.max_other_sites {
         candidate.warnings.push(format!("also anneals at {others} other site{}", if others == 1 { "" } else { "s" }));
     }
 }
@@ -292,7 +440,9 @@ fn check_other_sites(doc: &Document, candidate: &mut Candidate) {
 /// Design primer pairs that amplify `region` of `doc`, best first.
 ///
 /// The product holds the whole region; with `flank` above 0 it may also hold up to that many
-/// bases on either side. Tails are added to the 5' ends as given.
+/// bases on either side. Tails are added to the 5' ends as given. Pairs whose primers pass every
+/// limit come first, and when none do, the pairs that break the fewest rules are returned with
+/// those rules as warnings.
 pub fn design_pairs(doc: &Document, region: Span, options: &DesignOptions) -> Result<Vec<PrimerPair>> {
     if !doc.molecule.is_nucleic() {
         return Err(Error::Invalid("primers need a DNA template".into()));
@@ -305,15 +455,17 @@ pub fn design_pairs(doc: &Document, region: Span, options: &DesignOptions) -> Re
     }
     let len = doc.len();
     let region = region.normalize(len);
+    let limits = &options.limits;
+    let weights = &options.weights;
 
     // The best candidates on each side, checked for other binding sites.
     let shortlist = |forward: bool| {
         let mut side = side_candidates(doc, region, forward, options);
         side.truncate(SHORTLIST);
         for candidate in &mut side {
-            check_other_sites(doc, candidate);
+            check_other_sites(doc, candidate, limits);
         }
-        side.sort_by(|a, b| a.penalty.total_cmp(&b.penalty));
+        side.sort_by(|a, b| (a.warnings.len(), a.penalty).partial_cmp(&(b.warnings.len(), b.penalty)).unwrap_or(std::cmp::Ordering::Equal));
         side
     };
     let forwards = shortlist(true);
@@ -322,8 +474,8 @@ pub fn design_pairs(doc: &Document, region: Span, options: &DesignOptions) -> Re
         return Err(Error::Invalid("no primer fits there: the ends of the region hold ambiguous bases or run off the sequence".into()));
     }
 
-    // Every forward with every reverse: their own penalties, plus how far apart their melting
-    // temperatures are and whether their 3' ends pair with each other.
+    // Every forward with every reverse: their own penalties and faults, plus how the two pair
+    // with each other and how far apart their melting temperatures are.
     let mut pairs = Vec::new();
     for forward in &forwards {
         for reverse in &reverses {
@@ -336,29 +488,33 @@ pub fn design_pairs(doc: &Document, region: Span, options: &DesignOptions) -> Re
             if amplified.len() > len || amplified.len() < forward.site.len().max(reverse.site.len()) {
                 continue;
             }
-            let cross = cross_dimer(&forward.seq, &reverse.seq);
+            let compl_any = primers::pair_any(&forward.seq, &reverse.seq);
+            let compl_end = primers::pair_end(&forward.seq, &reverse.seq);
             let tm_gap = (forward.tm - reverse.tm).abs();
-            let mut penalty = forward.penalty + reverse.penalty + tm_gap;
+            let penalty = forward.penalty + reverse.penalty + weights.pair_tm_difference * tm_gap + weights.pair_any * compl_any + weights.pair_end * compl_end;
             let mut warnings = Vec::new();
-            if cross >= 4 {
-                penalty += 2.0 * (cross - 3) as f64;
-                warnings.push(format!("the primers' 3' ends pair with each other over {cross} bases"));
+            if compl_any > limits.max_pair_any {
+                warnings.push(format!("the primers pair with each other (score {compl_any:.1}, limit {:.0})", limits.max_pair_any));
             }
-            if tm_gap > 5.0 {
-                warnings.push(format!("melting temperatures {tm_gap:.1} C apart"));
+            if compl_end > limits.max_pair_end {
+                warnings.push(format!("the primers' 3' ends pair with each other (score {compl_end:.1}, limit {:.0})", limits.max_pair_end));
+            }
+            if tm_gap > limits.max_tm_difference {
+                warnings.push(format!("melting temperatures {tm_gap:.1} °C apart, more than {:.0}", limits.max_tm_difference));
             }
             pairs.push(PrimerPair {
                 forward: forward.clone(),
                 reverse: reverse.clone(),
                 amplified,
                 product_len: amplified.len() + forward.tail_len + reverse.tail_len,
-                cross_dimer: cross,
+                compl_any,
+                compl_end,
                 warnings,
                 penalty,
             });
         }
     }
-    pairs.sort_by(|a, b| a.penalty.total_cmp(&b.penalty));
+    pairs.sort_by(|a, b| (a.faults(), a.penalty).partial_cmp(&(b.faults(), b.penalty)).unwrap_or(std::cmp::Ordering::Equal));
 
     // Keep pairs that differ: no two with the same forward or the same reverse primer, so the
     // list offers real alternatives rather than one primer with many partners.
@@ -376,6 +532,29 @@ pub fn design_pairs(doc: &Document, region: Span, options: &DesignOptions) -> Re
         return Err(Error::Invalid("the primers found do not face each other across the region".into()));
     }
     Ok(chosen)
+}
+
+/// Design the best primer pair that amplifies exactly `span` of `doc`, with 5' tails
+/// (restriction sites, overlaps) when given, as primers named after the document. The pair is
+/// the first that [`design_pairs`] returns at `target_tm`.
+pub fn design_pcr_primers(
+    doc: &Document,
+    span: Span,
+    target_tm: f64,
+    forward_tail: &[u8],
+    reverse_tail: &[u8],
+    conditions: &TmConditions,
+) -> Result<(Primer, Primer)> {
+    let options = DesignOptions {
+        target_tm,
+        forward_tail: forward_tail.to_vec(),
+        reverse_tail: reverse_tail.to_vec(),
+        conditions: *conditions,
+        count: 1,
+        ..DesignOptions::default()
+    };
+    let pairs = design_pairs(doc, span, &options)?;
+    Ok(pairs[0].primers(&doc.name, doc.len()))
 }
 
 /// A concrete base for each position of an enzyme site, so it can be written into a primer:
@@ -486,22 +665,74 @@ mod tests {
     }
 
     #[test]
-    fn the_best_pair_amplifies_exactly_the_region_with_matched_temperatures() {
+    fn the_best_pair_amplifies_exactly_the_region_and_passes_every_rule() {
         let doc = Document::new_dna("t", random_dna(1500, 3), Topology::Circular);
         let region = Span::new(400, 1100);
         let pairs = design_pairs(&doc, region, &DesignOptions::default()).unwrap();
         assert!(!pairs.is_empty());
         let best = &pairs[0];
         assert_eq!(best.amplified, region, "with no flank the product is the region");
-        assert!((best.forward.tm - 60.0).abs() < 4.0 && (best.reverse.tm - 60.0).abs() < 4.0, "{} {}", best.forward.tm, best.reverse.tm);
+        // Random DNA offers primers Primer3 would accept: within 57 to 63 °C and clean.
+        assert!(best.forward.warnings.is_empty() && best.reverse.warnings.is_empty() && best.warnings.is_empty(), "{best:?}");
+        assert!((57.0..=63.0).contains(&best.forward.tm) && (57.0..=63.0).contains(&best.reverse.tm), "{} {}", best.forward.tm, best.reverse.tm);
+        assert!(best.forward.self_any <= 8.0 && best.forward.self_end <= 3.0 && best.compl_end <= 3.0);
         // The pair amplifies the region in a simulated PCR.
         let (f, r) = best.primers("t", doc.len());
         let product = pcr(&doc, &f, &r, &BindingRules::default()).unwrap();
         assert_eq!(product.doc.seq, region.extract(&doc.seq));
         // Pairs are listed best first and differ in both primers.
         for window in pairs.windows(2) {
-            assert!(window[0].penalty <= window[1].penalty);
+            assert!((window[0].faults(), window[0].penalty) <= (window[1].faults(), window[1].penalty));
             assert_ne!(window[0].forward.seq, window[1].forward.seq);
+        }
+    }
+
+    #[test]
+    fn the_penalty_is_primer3s() {
+        // Primer3 (primer3-py 2.4.0) gives these penalties at its defaults: one point per degree
+        // from 60 °C and one per base from 20.
+        let options = DesignOptions::default();
+        let m13_forward = judge(b"GTAAAACGACGGCCAGT", b"GTAAAACGACGGCCAGT", &options);
+        assert!((m13_forward.penalty - 8.3045).abs() < 0.001, "{}", m13_forward.penalty);
+        let m13_reverse = judge(b"AGCGGATAACAATTTCACACAGGA", b"AGCGGATAACAATTTCACACAGGA", &options);
+        assert!((m13_reverse.penalty - 4.8059).abs() < 0.001, "{}", m13_reverse.penalty);
+        // The warnings name the limits broken: M13 forward melts below 57 °C, and its 3' end
+        // pairs with another copy of itself over Primer3's limit of 3.
+        assert_eq!(m13_forward.warnings, vec!["Tm 54.7 °C is below 57".to_string(), "its 3' end pairs with itself (score 4.0, limit 3)".to_string()]);
+        assert!(m13_reverse.warnings.is_empty(), "{:?}", m13_reverse.warnings);
+        // A palindrome pairs with itself far over both limits.
+        let palindrome = judge(b"ATGCGAATTCGCAT", b"ATGCGAATTCGCAT", &options);
+        assert!(palindrome.warnings.iter().any(|w| w.starts_with("pairs with itself (score 14.0")), "{:?}", palindrome.warnings);
+        assert!(palindrome.warnings.iter().any(|w| w.starts_with("its 3' end pairs with itself (score 14.0")), "{:?}", palindrome.warnings);
+        // A run of six breaks the poly-X limit, and the GC limits are Primer3's.
+        let run = judge(b"GACTGACTGAAAAAATCAGTCG", b"GACTGACTGAAAAAATCAGTCG", &options);
+        assert!(run.warnings.iter().any(|w| w == "a run of 6 identical bases, more than 5"), "{:?}", run.warnings);
+        let at = judge(b"TTTTAAAATTTTAAAATTTT", b"TTTTAAAATTTTAAAATTTT", &options);
+        assert!(at.warnings.iter().any(|w| w == "GC 0% is below 20%"), "{:?}", at.warnings);
+    }
+
+    #[test]
+    fn when_no_primer_passes_the_least_faulty_is_picked_anyway() {
+        // A region whose ends keep only every fourth G or C: no length up to 27 reaches 57 °C.
+        let mut bases = random_dna(600, 11);
+        for (ii, b) in bases.iter_mut().enumerate() {
+            if ((200..230).contains(&ii) || (370..400).contains(&ii)) && ii % 4 != 0 {
+                *b = match *b {
+                    b'G' => b'A',
+                    b'C' => b'T',
+                    other => other,
+                };
+            }
+        }
+        let doc = Document::new_dna("t", bases, Topology::Linear);
+        let pairs = design_pairs(&doc, Span::new(200, 400), &DesignOptions::default()).unwrap();
+        let best = &pairs[0];
+        assert!(best.forward.warnings.iter().any(|w| w.contains("is below 57")), "{:?}", best.forward.warnings);
+        assert_eq!(best.forward.warnings.len(), 1, "the temperature is its only fault: {:?}", best.forward.warnings);
+        assert_eq!(best.amplified, Span::new(200, 400));
+        // The pairs still come fewest faults first.
+        for window in pairs.windows(2) {
+            assert!(window[0].faults() <= window[1].faults());
         }
     }
 
@@ -531,6 +762,13 @@ mod tests {
         assert_eq!(product.doc.len(), 500 + 24);
         assert!(product.doc.seq.starts_with(b"TAAGCAGAATTC"));
         assert!(product.doc.seq.ends_with(&revcomp(b"TAAGCAGGATCC")));
+        // The tails count in the pairing tests but not in the temperature.
+        let bare = &design_pairs(&doc, Span::new(200, 700), &DesignOptions::default()).unwrap()[0];
+        assert!((best.forward.tm - bare.forward.tm).abs() < 1e-9 || best.forward.annealing() != bare.forward.annealing());
+        // The named primers carry the tails and say what anneals.
+        let (f, _) = design_pcr_primers(&doc, Span::new(200, 700), 60.0, &site_tail(ecori, 6), &[], &TmConditions::default()).unwrap();
+        assert!(f.seq.starts_with("TAAGCAGAATTC"));
+        assert!(f.description.contains("12-nt 5' tail"), "{}", f.description);
     }
 
     #[test]
@@ -558,17 +796,5 @@ mod tests {
         // An opening at the origin takes the bases before it from the end of the circle.
         let (f, _) = homology_tails(&vector, Span::new(0, 0), 15).unwrap();
         assert_eq!(f, vector.seq[285..300].to_vec());
-    }
-
-    #[test]
-    fn three_prime_pairing_finds_ends_that_extend_on_each_other() {
-        // GAATTC pairs with itself, so a primer ending in it pairs with a copy of itself over
-        // those six bases.
-        assert_eq!(three_prime_pairing(b"AAAAGAATTC", b"AAAAGAATTC"), 6);
-        // The last eight bases of a, AAAAGCGC, pair with GCGCTTTT inside b.
-        assert_eq!(three_prime_pairing(b"AAAAAAAAGCGC", b"TTTTGCGCTTTT"), 8);
-        assert_eq!(three_prime_pairing(b"AAAAAAAAAAAA", b"CCCCCCCCCCCC"), 0);
-        // A pairing stretch away from the 3' ends cannot be extended, so it does not count.
-        assert!(cross_dimer(b"GAATTCAAAAAA", b"GAATTCAAAAAA") < 4);
     }
 }

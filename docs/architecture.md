@@ -91,7 +91,8 @@ After an edit, the caller recomputes where primers bind (`primers::refresh_bindi
 | `alphabet.rs` | IUPAC codes, complements, cleaning of pasted sequence |
 | `enzymes.rs` | The enzyme database, enzyme sets, site finding and cut positions |
 | `digest.rs` | Fragments with exact sticky ends, ligation and circularisation |
-| `primers.rs` | Nearest-neighbour Tm, binding sites with mismatches, dimer and hairpin checks, primer design |
+| `primers.rs` | Melting temperatures as Primer3 computes them (SantaLucia 1998 with Primer3's salt correction and conditions), binding sites with mismatches, and Primer3's primer checks: its alignment scores for a primer pairing with itself or another primer (`self_any`, `self_end`, `pair_any`, `pair_end`) and the stability of the last five bases |
+| `primer_design.rs` | Primer design after Primer3: every length of each primer is judged by Primer3's limits and penalty weights (`Limits`, `Weights`, Primer3's defaults), pairs are ranked by the pair penalty, and when nothing passes the least faulty pair is returned with its faults as warnings. Tails for cloning (restriction sites, Golden Gate, homology) are made here too |
 | `pcr.rs` | PCR products, including 5' tails and the template's features |
 | `cloning.rs` | Restriction cloning, Gibson / HiFi / In-Fusion assembly, Golden Gate |
 | `excise.rs` | The enzymes that cut nearest a marked region on each side, and what a chosen pair cuts out, checked on the vector |

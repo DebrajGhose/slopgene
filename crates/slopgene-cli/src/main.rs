@@ -239,7 +239,8 @@ enum Command {
         #[arg(long)]
         uncut: bool,
     },
-    /// Melting temperature and quality checks for oligos.
+    /// Melting temperature and quality checks for oligos, as Primer3 computes them. The
+    /// conditions default to Primer3's.
     Tm {
         /// One or more sequences.
         #[arg(required = true)]
@@ -248,13 +249,13 @@ enum Command {
         #[arg(long, default_value_t = 50.0)]
         na: f64,
         /// Mg2+ (mM).
-        #[arg(long, default_value_t = 0.0)]
+        #[arg(long, default_value_t = 1.5)]
         mg: f64,
         /// dNTPs (mM).
-        #[arg(long, default_value_t = 0.0)]
+        #[arg(long, default_value_t = 0.6)]
         dntp: f64,
         /// Oligo concentration (nM).
-        #[arg(long, default_value_t = 250.0)]
+        #[arg(long, default_value_t = 50.0)]
         oligo: f64,
     },
     /// Simulate a PCR. Primers can be sequences or names of primers stored in the template.

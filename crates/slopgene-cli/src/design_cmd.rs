@@ -5,6 +5,7 @@ use anyhow::{Result, anyhow, bail};
 use serde_json::{Value, json};
 use slopgene_core::io::Format;
 use slopgene_core::pcr::pcr;
+use slopgene_core::primer_design::{self, DesignOptions};
 use slopgene_core::primers::{self, BindingRules, TmConditions};
 use slopgene_core::render::thousands;
 use slopgene_core::span::parse_range;
@@ -13,7 +14,8 @@ use std::path::{Path, PathBuf};
 
 pub fn tm(seqs: &[String], conditions: TmConditions) -> Result<Output> {
     let mut values = Vec::new();
-    let mut rows = vec![vec!["sequence".into(), "length".into(), "Tm".into(), "GC".into(), "warnings".into()]];
+    let mut rows =
+        vec![vec!["sequence".into(), "length".into(), "Tm".into(), "GC".into(), "self any".into(), "self end".into(), "3' ΔG".into(), "warnings".into()]];
     for s in seqs {
         let bases = clean_dna(s)?;
         let report = primers::analyze(&bases, &conditions);
@@ -22,6 +24,9 @@ pub fn tm(seqs: &[String], conditions: TmConditions) -> Result<Output> {
             "length": report.length,
             "tm": (report.tm * 10.0).round() / 10.0,
             "gc_percent": (report.gc_percent * 10.0).round() / 10.0,
+            "self_any": report.self_any,
+            "self_end": report.self_end,
+            "end_stability": (report.end_stability * 100.0).round() / 100.0,
             "self_dimer": report.self_dimer,
             "three_prime_dimer": report.three_prime_dimer,
             "hairpin_stem": report.hairpin_stem,
@@ -33,6 +38,9 @@ pub fn tm(seqs: &[String], conditions: TmConditions) -> Result<Output> {
             report.length.to_string(),
             format!("{:.1} °C", report.tm),
             format!("{:.0}%", report.gc_percent),
+            format!("{:.1}", report.self_any),
+            format!("{:.1}", report.self_end),
+            format!("{:.2}", report.end_stability),
             report.warnings.join("; "),
         ]);
     }
@@ -105,16 +113,31 @@ pub fn design_primers(path: &str, range: &str, target_tm: f64, fwd_tail: &str, r
     let mut doc = load(&path)?;
     let span = parse_range(range, doc.len(), doc.is_circular())?;
     let tail = |t: &str| -> Result<Vec<u8>> { if t.is_empty() { Ok(Vec::new()) } else { clean_dna(t) } };
-    let conditions = TmConditions::default();
-    let (fwd, rev) = primers::design_pcr_primers(&doc, span, target_tm, &tail(fwd_tail)?, &tail(rev_tail)?, &conditions)?;
-    let describe = |p: &Primer| {
-        let report = primers::analyze(p.seq.as_bytes(), &conditions);
-        json!({ "name": p.name, "sequence": p.seq, "length": p.seq.len(), "annealing": p.description, "warnings": report.warnings })
+    let options = DesignOptions { target_tm, forward_tail: tail(fwd_tail)?, reverse_tail: tail(rev_tail)?, count: 1, ..DesignOptions::default() };
+    let pairs = primer_design::design_pairs(&doc, span, &options)?;
+    let best = &pairs[0];
+    let (fwd, rev) = best.primers(&doc.name, doc.len());
+    // Each primer with Primer3's numbers for it.
+    let describe = |p: &Primer, c: &primer_design::Candidate| {
+        json!({
+            "name": p.name, "sequence": p.seq, "length": p.seq.len(), "anneals": c.annealing().len(), "annealing": p.description,
+            "tm": (c.tm * 10.0).round() / 10.0, "gc_percent": (c.gc_percent * 10.0).round() / 10.0,
+            "self_any": c.self_any, "self_end": c.self_end, "end_stability": (c.end_stability * 100.0).round() / 100.0,
+            "penalty": (c.penalty * 1000.0).round() / 1000.0, "warnings": c.warnings,
+        })
     };
-    let product_len = span.len() + fwd_tail.len() + rev_tail.len();
-    let mut value = json!({ "forward": describe(&fwd), "reverse": describe(&rev), "product_length": product_len });
+    let product_len = best.product_len;
+    let mut value = json!({
+        "forward": describe(&fwd, &best.forward), "reverse": describe(&rev, &best.reverse), "product_length": product_len,
+        "pair": { "compl_any": best.compl_any, "compl_end": best.compl_end, "penalty": (best.penalty * 1000.0).round() / 1000.0, "warnings": best.warnings },
+        "method": "Primer3",
+    });
     let mut text =
         format!("{}  {}  ({})\n{}  {}  ({})\nproduct: {} bp", fwd.name, fwd.seq, fwd.description, rev.name, rev.seq, rev.description, thousands(product_len));
+    let warnings: Vec<&String> = best.forward.warnings.iter().chain(&best.reverse.warnings).chain(&best.warnings).collect();
+    if !warnings.is_empty() {
+        text.push_str(&format!("\nwarning: {}", warnings.iter().map(|w| w.as_str()).collect::<Vec<_>>().join("; ")));
+    }
     if add {
         doc.primers.push(fwd);
         doc.primers.push(rev);

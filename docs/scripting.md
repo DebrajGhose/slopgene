@@ -407,8 +407,8 @@ for step in run.steps {
 | `gc(seq) -> float` | GC content in percent. |
 | `translate(seq) -> string` | The protein from the first base, with the standard genetic code. |
 | `translate(seq, table) -> string` | The protein from the first base, with the NCBI genetic code of this table number. |
-| `tm(seq) -> float` | The nearest-neighbour melting temperature at SnapGene's default conditions. |
-| `primer_report(seq) -> map` | Length, tm, gc_percent, self_dimer, three_prime_dimer, hairpin_stem and warnings for an oligo. |
+| `tm(seq) -> float` | The melting temperature as Primer3 computes it (SantaLucia 1998, at Primer3's default conditions). |
+| `primer_report(seq) -> map` | Length, tm, gc_percent, Primer3's self_any and self_end pairing scores and end_stability, self_dimer, three_prime_dimer, hairpin_stem and warnings for an oligo. |
 
 `tm` uses the parameters of SantaLucia (1998) with 50 mM Na+ and 250 nM oligo.
 These are the conditions SnapGene assumes by default.

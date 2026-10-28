@@ -1,16 +1,19 @@
-//! Primers: melting temperature, binding sites, quality checks and simple design.
+//! Primers: melting temperature, binding sites and quality checks, by Primer3's methods.
 //!
 //! Melting temperatures use the nearest-neighbour model with the unified parameters of
-//! SantaLucia (1998) and SantaLucia & Hicks (2004), with the entropy salt correction from the
-//! same papers. The defaults match the conditions SnapGene states it assumes: 50 mM Na+ and
-//! 0.25 uM oligo, no Mg2+.
+//! SantaLucia (1998), the entropy salt correction of the same paper and the sodium equivalent of
+//! magnesium from von Ahsen et al. (2001), as Primer3 computes them (its `PRIMER_TM_FORMULA` 1
+//! and `PRIMER_SALT_CORRECTIONS` 1). The default conditions are Primer3's: 50 mM monovalent
+//! salt, 1.5 mM Mg2+, 0.6 mM dNTPs and 50 nM oligo. The quality checks are Primer3's too: its
+//! alignment scores for a primer pairing with itself or with another primer, and its stability
+//! of the last five bases. `primer_design` builds the designer on them.
 
 use crate::alphabet::{self, iupac_matches};
-use crate::model::{BindingSite, Document, Primer, Strand, XmlExtra};
+use crate::model::{BindingSite, Document, Strand, XmlExtra};
 use crate::span::Span;
 
-/// Gas constant in cal/(K mol).
-const R: f64 = 1.9872;
+/// Gas constant in cal/(K mol), rounded as Primer3 rounds it.
+const R: f64 = 1.987;
 
 /// Conditions for a melting-temperature estimate.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -21,14 +24,14 @@ pub struct TmConditions {
     pub magnesium_mm: f64,
     /// dNTPs, millimolar (they bind Mg2+).
     pub dntp_mm: f64,
-    /// Oligo concentration, nanomolar. For a primer in excess over its template this is the
-    /// primer concentration.
+    /// Oligo concentration, nanomolar (Primer3's PRIMER_DNA_CONC).
     pub oligo_nm: f64,
 }
 
 impl Default for TmConditions {
+    /// Primer3's defaults: 50 mM monovalent salt, 1.5 mM Mg2+, 0.6 mM dNTPs and 50 nM oligo.
     fn default() -> Self {
-        TmConditions { monovalent_mm: 50.0, magnesium_mm: 0.0, dntp_mm: 0.0, oligo_nm: 250.0 }
+        TmConditions { monovalent_mm: 50.0, magnesium_mm: 1.5, dntp_mm: 0.6, oligo_nm: 50.0 }
     }
 }
 
@@ -86,7 +89,8 @@ pub fn duplex_thermodynamics(seq: &[u8]) -> Option<(f64, f64)> {
     Some((dh, ds))
 }
 
-/// Melting temperature (deg C) of `seq` annealed to its perfect complement.
+/// Melting temperature (deg C) of `seq` annealed to its perfect complement, as Primer3
+/// computes it.
 ///
 /// Falls back to the Wallace rule (2 C per A/T, 4 C per G/C) for sequences with ambiguous bases
 /// or shorter than 8 bases, where nearest-neighbour values are unreliable.
@@ -102,15 +106,176 @@ pub fn melting_temperature(seq: &[u8], conditions: &TmConditions) -> f64 {
     let Some((dh, ds)) = duplex_thermodynamics(seq) else {
         return wallace();
     };
-    // Sodium-equivalent concentration (M): Na+ plus 120 * sqrt(free Mg2+), in mM.
+    // The sodium equivalent (mM) of the salts: the monovalent cations plus 120 times the square
+    // root of the Mg2+ left after the dNTPs have bound their share (von Ahsen et al. 2001).
     let free_mg = (conditions.magnesium_mm - conditions.dntp_mm).max(0.0);
-    let na_eq = (conditions.monovalent_mm + 120.0 * free_mg.sqrt()) / 1000.0;
-    let ds_salt = ds + 0.368 * (seq.len() as f64 - 1.0) * na_eq.max(1e-6).ln();
-    // A primer anneals to a template it is in excess over, so the concentration term is the
-    // oligo concentration itself (x = 1 in SantaLucia's notation). SnapGene's "0.5 uM each for
-    // two annealed oligos" gives the same value, 1 uM total divided by 4.
+    let k_mm = conditions.monovalent_mm + 120.0 * free_mg.sqrt();
+    let ds_salt = ds + 0.368 * (seq.len() as f64 - 1.0) * (k_mm / 1000.0).max(1e-6).ln();
+    // The concentration term as Primer3 takes it: the oligo concentration for an oligo that is
+    // its own complement, and a quarter of it otherwise, for two strands at the same
+    // concentration.
     let oligo = conditions.oligo_nm.max(1e-3) * 1e-9;
-    dh * 1000.0 / (ds_salt + R * oligo.ln()) - 273.15
+    let c = if alphabet::revcomp(seq).eq_ignore_ascii_case(seq) { oligo } else { oligo / 4.0 };
+    dh * 1000.0 / (ds_salt + R * c.ln()) - 273.15
+}
+
+/// The stability of the stack `a b` (read 5'->3' on one strand) at 37 °C, as -ΔG° in kcal/mol
+/// from SantaLucia (1998), the table Primer3 uses. A stack with an ambiguous base takes the
+/// value Primer3 gives it.
+fn stacking_stability(a: u8, b: u8) -> f64 {
+    let code = |x: u8| match x.to_ascii_uppercase() {
+        b'A' => 0,
+        b'C' => 1,
+        b'G' => 2,
+        b'T' => 3,
+        _ => 4,
+    };
+    const TABLE: [[f64; 5]; 5] = [
+        [1.00, 1.44, 1.28, 0.88, 0.88], // AA, AC, AG, AT, AN
+        [1.45, 1.84, 2.17, 1.28, 1.45], // CA, CC, CG, CT, CN
+        [1.30, 2.24, 1.84, 1.44, 1.30], // GA, GC, GG, GT, GN
+        [0.58, 1.30, 1.45, 1.00, 0.58], // TA, TC, TG, TT, TN
+        [0.58, 1.30, 1.28, 0.88, 0.58], // NA, NC, NG, NT, NN
+    ];
+    TABLE[code(a)][code(b)]
+}
+
+/// Primer3's stability of a duplex of `seq`, in kcal/mol: -ΔG°37 from SantaLucia's (1998)
+/// nearest-neighbour free energies, that is the stacks, less 1.96 for starting the duplex, 0.05
+/// for each A or T at an end and 0.43 for an oligo that is its own complement. Bigger is more
+/// stable.
+pub fn duplex_stability(seq: &[u8]) -> f64 {
+    if seq.len() < 2 {
+        return 0.0;
+    }
+    let mut stability: f64 = seq.windows(2).map(|pair| stacking_stability(pair[0], pair[1])).sum();
+    stability -= 1.96;
+    for &end in &[seq[0], seq[seq.len() - 1]] {
+        if matches!(end.to_ascii_uppercase(), b'A' | b'T') {
+            stability -= 0.05;
+        }
+    }
+    if alphabet::revcomp(seq).eq_ignore_ascii_case(seq) {
+        stability -= 0.43;
+    }
+    stability
+}
+
+/// The stability of the last five bases, Primer3's end stability: how firmly a primer's 3' end
+/// holds on, and so how readily a polymerase starts from a place where only the end pairs.
+/// GCGCG gives 6.86 kcal/mol, the most possible, and TATAT 0.86.
+pub fn end_stability(seq: &[u8]) -> f64 {
+    duplex_stability(&seq[seq.len().saturating_sub(5)..])
+}
+
+/// How Primer3's alignment of two sequences is anchored.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Anchor {
+    /// The best stretch anywhere, as in a local alignment.
+    Anywhere,
+    /// An alignment that reaches the last base of the first sequence, Primer3's test for a 3' end
+    /// that a polymerase could extend.
+    End,
+}
+
+/// Primer3's score of one base of a sequence against one base of another, in hundredths: 100 for
+/// the same base, -100 for different bases and -25 when either is N or another ambiguity code.
+/// The second sequence is the reverse complement of the first one's partner, so the same base
+/// means that the two pair.
+fn align_score(a: u8, b: u8) -> i32 {
+    let (a, b) = (a.to_ascii_uppercase(), b.to_ascii_uppercase());
+    if !matches!(a, b'A' | b'C' | b'G' | b'T') || !matches!(b, b'A' | b'C' | b'G' | b'T') {
+        -25
+    } else if a == b {
+        100
+    } else {
+        -100
+    }
+}
+
+/// Primer3's alignment score between `s1` and `s2`, as its `dpal` routine computes it with the
+/// settings Primer3 uses for primers: a match scores 1.00, a mismatch -1.00, a base against an N
+/// -0.25 and a gap of one base -2.00, with no longer gaps. With [`Anchor::Anywhere`] the best
+/// stretch anywhere counts and stretches below zero are dropped, as in a local alignment. With
+/// [`Anchor::End`] the alignment must reach the last base of `s1` and runs back to the start of
+/// one of the sequences, mismatches and all. A score below zero is reported as zero.
+pub fn primer3_alignment(s1: &[u8], s2: &[u8], anchor: Anchor) -> f64 {
+    let x = alphabet::upper(s1);
+    let y = alphabet::upper(s2);
+    let (xlen, ylen) = (x.len(), y.len());
+    if xlen == 0 || ylen == 0 {
+        return 0.0;
+    }
+    const GAP: i32 = -200;
+    let local = anchor == Anchor::Anywhere;
+    let mut s = vec![vec![0i32; ylen]; xlen];
+    let mut best_score = i32::MIN;
+    // The first column and the first row: one pair each, with nothing before it. A local
+    // alignment may end anywhere, so each cell is a candidate; an anchored one ends in the last
+    // row only, and starts from the last row's first cell.
+    for ii in 0..xlen {
+        let mut score = align_score(x[ii], y[0]);
+        if local {
+            score = score.max(0);
+            best_score = best_score.max(score);
+        }
+        s[ii][0] = score;
+    }
+    if !local {
+        best_score = s[xlen - 1][0];
+    }
+    for jj in 0..ylen {
+        let mut score = align_score(x[0], y[jj]);
+        if local {
+            score = score.max(0);
+            best_score = best_score.max(score);
+        }
+        s[0][jj] = score;
+    }
+    // Each further cell continues the best of the cell diagonally before it and the two cells a
+    // one-base gap away, and adds the score of its own pair.
+    for ii in 1..xlen {
+        for jj in 1..ylen {
+            let mut before = s[ii - 1][jj - 1];
+            if ii > 1 {
+                before = before.max(s[ii - 2][jj - 1] + GAP);
+            }
+            if jj > 1 {
+                before = before.max(s[ii - 1][jj - 2] + GAP);
+            }
+            let mut score = before + align_score(x[ii], y[jj]);
+            if local || ii == xlen - 1 {
+                best_score = best_score.max(score);
+            }
+            if local {
+                score = score.max(0);
+            }
+            s[ii][jj] = score;
+        }
+    }
+    f64::from(best_score.max(0)) / 100.0
+}
+
+/// Primer3's score for an oligo pairing with another copy of itself anywhere (its SELF_ANY).
+/// Primer3 accepts up to 8.
+pub fn self_any(oligo: &[u8]) -> f64 {
+    primer3_alignment(oligo, &alphabet::revcomp(oligo), Anchor::Anywhere)
+}
+
+/// Primer3's score for an oligo's 3' end pairing with another copy of itself (its SELF_END), the
+/// primer-dimer test. Primer3 accepts up to 3.
+pub fn self_end(oligo: &[u8]) -> f64 {
+    primer3_alignment(oligo, &alphabet::revcomp(oligo), Anchor::End)
+}
+
+/// Primer3's score for two primers pairing with each other anywhere (its PAIR_COMPL_ANY).
+pub fn pair_any(a: &[u8], b: &[u8]) -> f64 {
+    primer3_alignment(a, &alphabet::revcomp(b), Anchor::Anywhere)
+}
+
+/// Primer3's score for the 3' end of either primer pairing with the other (its PAIR_COMPL_END).
+pub fn pair_end(a: &[u8], b: &[u8]) -> f64 {
+    primer3_alignment(a, &alphabet::revcomp(b), Anchor::End).max(primer3_alignment(b, &alphabet::revcomp(a), Anchor::End))
 }
 
 /// Rules for finding where a primer anneals, after SnapGene's hybridization parameters.
@@ -245,6 +410,12 @@ pub struct PrimerReport {
     pub length: usize,
     pub gc_percent: f64,
     pub tm: f64,
+    /// Primer3's alignment scores of the oligo against its own reverse complement: anywhere, and
+    /// ending at its 3' end. Primer3 accepts up to 8 and 3.
+    pub self_any: f64,
+    pub self_end: f64,
+    /// Primer3's stability of the last five bases, in kcal/mol.
+    pub end_stability: f64,
     /// Longest stretch of the primer that can pair with another copy of itself.
     pub self_dimer: usize,
     /// Longest such stretch that includes the primer's 3'-terminal base (the risky kind).
@@ -258,7 +429,8 @@ pub struct PrimerReport {
     pub warnings: Vec<String>,
 }
 
-/// Analyse a primer.
+/// Analyse a primer: Primer3's numbers and the limits of its that the primer breaks, with the
+/// plain stretch counts (self-dimer, hairpin stem, run) as further information.
 pub fn analyze(primer: &[u8], conditions: &TmConditions) -> PrimerReport {
     let seq = alphabet::upper(primer);
     let n = seq.len();
@@ -311,69 +483,41 @@ pub fn analyze(primer: &[u8], conditions: &TmConditions) -> PrimerReport {
     }
     let three_prime_gc = seq[n.saturating_sub(5)..].iter().filter(|b| matches!(b, b'G' | b'C')).count();
 
+    let self_any = self_any(&seq);
+    let self_end = self_end(&seq);
+    let end_stability = end_stability(&seq);
+
+    // The warnings are Primer3's limits, broken.
     let mut warnings = Vec::new();
     if n < 15 {
         warnings.push(format!("short primer ({n} nt)"));
     }
-    if !(40.0..=60.0).contains(&gc_percent) {
-        warnings.push(format!("GC content {gc_percent:.0}% is outside 40-60%"));
+    if !(20.0..=80.0).contains(&gc_percent) {
+        warnings.push(format!("GC content {gc_percent:.0}% is outside 20-80%"));
     }
-    if three_prime_dimer >= 4 {
-        warnings.push(format!("3' end can pair with itself over {three_prime_dimer} bases (primer dimer)"));
+    if self_any > 8.0 {
+        warnings.push(format!("pairs with itself (score {self_any:.1}, limit 8)"));
     }
-    if hairpin_stem >= 4 {
-        warnings.push(format!("possible hairpin with a {hairpin_stem}-base stem"));
+    if self_end > 3.0 {
+        warnings.push(format!("its 3' end pairs with itself (score {self_end:.1}, limit 3)"));
     }
-    if longest_run >= 5 {
-        warnings.push(format!("run of {longest_run} identical bases"));
+    if longest_run > 5 {
+        warnings.push(format!("run of {longest_run} identical bases, more than 5"));
     }
-    if three_prime_gc > 3 {
-        warnings.push(format!("{three_prime_gc} G/C among the last 5 bases (3' end too sticky)"));
+    PrimerReport {
+        length: n,
+        gc_percent,
+        tm,
+        self_any,
+        self_end,
+        end_stability,
+        self_dimer,
+        three_prime_dimer,
+        hairpin_stem,
+        longest_run,
+        three_prime_gc,
+        warnings,
     }
-    PrimerReport { length: n, gc_percent, tm, self_dimer, three_prime_dimer, hairpin_stem, longest_run, three_prime_gc, warnings }
-}
-
-/// Pick the length (within `min_len..=max_len`) of a primer starting at the 5' end of `region`
-/// so its Tm is closest to `target_tm`. `region` is read 5'->3' along the primer's strand.
-pub fn choose_primer_length(region: &[u8], target_tm: f64, min_len: usize, max_len: usize, conditions: &TmConditions) -> Option<usize> {
-    let max_len = max_len.min(region.len());
-    if min_len > max_len {
-        return None;
-    }
-    (min_len..=max_len).min_by(|&a, &b| {
-        let da = (melting_temperature(&region[..a], conditions) - target_tm).abs();
-        let db = (melting_temperature(&region[..b], conditions) - target_tm).abs();
-        da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
-    })
-}
-
-/// Design a primer pair that amplifies exactly `span` of `doc`, optionally with 5' tails
-/// (restriction sites, overlaps). Returns (forward, reverse) primers.
-pub fn design_pcr_primers(
-    doc: &Document,
-    span: Span,
-    target_tm: f64,
-    forward_tail: &[u8],
-    reverse_tail: &[u8],
-    conditions: &TmConditions,
-) -> crate::error::Result<(Primer, Primer)> {
-    let region = doc.subseq(span);
-    if region.len() < 30 {
-        return Err(crate::error::Error::Invalid("region is too short to amplify (needs at least 30 bp)".into()));
-    }
-    let fwd_len = choose_primer_length(&region, target_tm, 18, 32, conditions).unwrap_or(20);
-    let rc_region = alphabet::revcomp(&region);
-    let rev_len = choose_primer_length(&rc_region, target_tm, 18, 32, conditions).unwrap_or(20);
-    let mut fwd = forward_tail.to_vec();
-    fwd.extend_from_slice(&region[..fwd_len]);
-    let mut rev = reverse_tail.to_vec();
-    rev.extend_from_slice(&rc_region[..rev_len]);
-    let (a, b) = span.to_1based(doc.len());
-    let mut forward = Primer::new(format!("{}_{a}_F", doc.name), String::from_utf8_lossy(&fwd).to_uppercase());
-    let mut reverse = Primer::new(format!("{}_{b}_R", doc.name), String::from_utf8_lossy(&rev).to_uppercase());
-    forward.description = format!("anneals {fwd_len} nt, Tm {:.1} °C", melting_temperature(&region[..fwd_len], conditions));
-    reverse.description = format!("anneals {rev_len} nt, Tm {:.1} °C", melting_temperature(&rc_region[..rev_len], conditions));
-    Ok((forward, reverse))
 }
 
 #[cfg(test)]
@@ -432,8 +576,86 @@ mod tests {
     fn primer_report_flags_problems() {
         let c = TmConditions::default();
         let good = analyze(b"AGCGGATAACAATTTCACACAGGA", &c);
-        assert!(good.warnings.iter().all(|w| !w.contains("dimer")), "{:?}", good.warnings);
+        assert!(good.warnings.is_empty(), "{:?}", good.warnings);
         let dimer = analyze(b"ATGCGAATTCGCAT", &c);
         assert!(dimer.three_prime_dimer >= 4);
+        assert!(dimer.warnings.iter().any(|w| w.starts_with("its 3' end pairs with itself (score 14.0")), "{:?}", dimer.warnings);
+    }
+
+    // The reference values below come from Primer3 itself (primer3_core 2.6 through primer3-py
+    // 2.4.0), at Primer3's default conditions unless said otherwise.
+
+    #[test]
+    fn melting_temperatures_match_primer3() {
+        let c = TmConditions::default();
+        for (seq, tm) in [
+            ("CGTGACGTGACGGACT", 55.973),
+            ("GTAAAACGACGGCCAGT", 54.695),
+            ("AGCGGATAACAATTTCACACAGGA", 60.806),
+            ("ATGCGAATTCGCAT", 47.346),
+            ("GCGCGCGCGCGCGCGCGCGC", 83.405),
+            ("TTTTAAAATTTTAAAATTTT", 39.100),
+            ("CAGGAAACAGCTATGACCATG", 56.676),
+            ("AAAAAGCCCCCTTTTTGGGGG", 61.610),
+        ] {
+            let ours = melting_temperature(seq.as_bytes(), &c);
+            assert!((ours - tm).abs() < 0.01, "{seq}: {ours} vs Primer3's {tm}");
+        }
+        // The example in Primer3's manual: 50 mM salt alone and 50 nM oligo give 50.55 °C.
+        let plain = TmConditions { magnesium_mm: 0.0, dntp_mm: 0.0, ..c };
+        assert!((melting_temperature(b"CGTGACGTGACGGACT", &plain) - 50.55).abs() < 0.01);
+    }
+
+    #[test]
+    fn pairing_scores_match_primer3() {
+        for (seq, any, end) in [
+            ("GTAAAACGACGGCCAGT", 4.0, 4.0),
+            ("AGCGGATAACAATTTCACACAGGA", 4.0, 0.0),
+            ("ATGCGAATTCGCAT", 14.0, 14.0),
+            ("CAGGAAACAGCTATGACCATG", 4.0, 4.0),
+            ("GCGCGCGCGCGCGCGCGCGC", 20.0, 20.0),
+            ("TTTTAAAATTTTAAAATTTT", 16.0, 16.0),
+            ("AAAAAGCCCCCTTTTTGGGGG", 8.0, 5.0),
+            ("CGTGACGTGACGGACT", 8.0, 1.0),
+            ("ACGTACGTTGCAGGCATGCAAGCT", 10.0, 8.0),
+            ("AGCTTGCATGCCTGCAGGTCGACT", 8.0, 4.0),
+            // With tails, which Primer3 calls overhangs.
+            ("TAAGCAGAATTCGTAAAACGACGGCCAGT", 6.0, 4.0),
+            ("TAAGCAGGATCCAGCGGATAACAATTTCACACAGGA", 8.0, 3.0),
+        ] {
+            assert_eq!(self_any(seq.as_bytes()), any, "{seq} self_any");
+            assert_eq!(self_end(seq.as_bytes()), end, "{seq} self_end");
+        }
+        for (a, b, any, end) in [
+            ("GTAAAACGACGGCCAGT", "AGCGGATAACAATTTCACACAGGA", 4.0, 2.0),
+            ("ATGCGAATTCGCAT", "CAGGAAACAGCTATGACCATG", 3.0, 3.0),
+            ("GCGCGCGCGCGCGCGCGCGC", "TTTTAAAATTTTAAAATTTT", 0.0, 0.0),
+            ("AAAAAGCCCCCTTTTTGGGGG", "CGTGACGTGACGGACT", 3.0, 0.0),
+            ("ACGTACGTTGCAGGCATGCAAGCT", "AGCTTGCATGCCTGCAGGTCGACT", 16.0, 14.0),
+            ("TAAGCAGAATTCGTAAAACGACGGCCAGT", "TAAGCAGGATCCAGCGGATAACAATTTCACACAGGA", 4.0, 2.0),
+        ] {
+            assert_eq!(pair_any(a.as_bytes(), b.as_bytes()), any, "{a} {b} pair_any");
+            assert_eq!(pair_end(a.as_bytes(), b.as_bytes()), end, "{a} {b} pair_end");
+        }
+    }
+
+    #[test]
+    fn end_stability_matches_primer3() {
+        for (seq, stability) in [
+            ("GCGCG", 6.86),
+            ("TATAT", 0.86),
+            ("GTAAAACGACGGCCAGT", 4.00),
+            ("AGCGGATAACAATTTCACACAGGA", 3.86),
+            ("ATGCGAATTCGCAT", 4.73),
+            ("CAGGAAACAGCTATGACCATG", 3.66),
+            ("TTTTAAAATTTTAAAATTTT", 1.82),
+            ("AAAAAGCCCCCTTTTTGGGGG", 5.40),
+            ("CGTGACGTGACGGACT", 3.85),
+            ("ACGTACGTTGCAGGCATGCAAGCT", 3.74),
+            ("AGCTTGCATGCCTGCAGGTCGACT", 4.18),
+        ] {
+            let ours = end_stability(seq.as_bytes());
+            assert!((ours - stability).abs() < 0.005, "{seq}: {ours} vs Primer3's {stability}");
+        }
     }
 }

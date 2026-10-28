@@ -791,7 +791,8 @@ fn register_utilities(engine: &mut Engine) {
     engine.register_fn("primer_report", |seq: &str| -> R<Dynamic> {
         let r = primers::analyze(&clean(seq)?, &TmConditions::default());
         Ok(to_dyn(serde_json::json!({
-            "length": r.length, "tm": r.tm, "gc_percent": r.gc_percent, "self_dimer": r.self_dimer,
+            "length": r.length, "tm": r.tm, "gc_percent": r.gc_percent, "self_any": r.self_any, "self_end": r.self_end,
+            "end_stability": r.end_stability, "self_dimer": r.self_dimer,
             "three_prime_dimer": r.three_prime_dimer, "hairpin_stem": r.hairpin_stem, "warnings": r.warnings,
         })))
     });

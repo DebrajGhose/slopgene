@@ -69,8 +69,13 @@ To use a newer REBASE release, run `slopgene enzymes import-rebase` and point th
 | Use primers stored in the file | `slopgene pcr template.dna --fwd "M13 fwd" --rev "M13 rev"` |
 | Design primers for a region | `slopgene design-primers template.dna --range 120..980 --fwd-tail GGTCTCA` |
 
-Tm uses the nearest-neighbour model (SantaLucia 1998) with 50 mM Na+ and 250 nM oligo, the conditions SnapGene assumes.
+Melting temperatures and primer checks follow Primer3.
+Tm is SantaLucia's (1998) nearest-neighbour model with Primer3's salt correction, at Primer3's default conditions: 50 mM monovalent salt, 1.5 mM Mg2+, 0.6 mM dNTPs and 50 nM oligo.
 Change them with `--na`, `--mg`, `--dntp` and `--oligo`.
+`tm` reports Primer3's `self_any` and `self_end` pairing scores (Primer3 accepts up to 8 and 3) and the `end_stability` of the last five bases in kcal/mol.
+`design-primers` and the PCR steps of protocols design primers as Primer3 does: every length from 18 to 27 bases is judged by Primer3's limits (Tm within 3 °C of the target, GC 20 to 80%, no run over 5, the two pairing scores, no other binding site on the template) and ranked by Primer3's penalty, one point per degree from the target and one per base from 20.
+When no primer passes, the least faulty is returned with its faults as `warnings`.
+Primer3's thermodynamic hairpin and dimer model is not used; the pairing scores are Primer3's alignment scores.
 PCR products carry the primers' own bases, so 5' tails appear in the product.
 
 ## Cloning
