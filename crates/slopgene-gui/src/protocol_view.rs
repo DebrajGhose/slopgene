@@ -489,6 +489,12 @@ fn theme_on(settings: &ViewSettings, background: Color32) -> Theme {
     theme
 }
 
+/// The id of the turn of step `step`'s map to a new top, which the bench's card, the zoom and
+/// the detailed view share, so a map keeps turning while the view changes around it.
+fn turn_id(tab: &ProtocolTab, step: usize) -> egui::Id {
+    egui::Id::unique(("protocol-turn", tab.id, step))
+}
+
 /// The cut a card shows, as the core colours it from the run.
 fn cut_view(tab: &ProtocolTab, card: &Card) -> Option<CutView> {
     bench::cut_view(&tab.protocol, &tab.run, card)
@@ -1103,6 +1109,7 @@ pub fn show(ui: &mut egui::Ui, tab: &mut ProtocolTab, docs: &[DocTab], settings:
                 };
                 let rect = lerp(ring_from, target);
                 let mut options = shown.options;
+                options.top = map_view::turned_top(ui, turn_id(tab, step), options.top, shown.doc.len());
                 options.width = rect.width();
                 options.height = rect.height();
                 options.font_size = 10.5 + 1.5 * t;
@@ -1620,6 +1627,7 @@ fn draw_card(
         }
         Some(shown) => {
             let mut options = shown.options;
+            options.top = map_view::turned_top(ui, turn_id(tab, c.step.unwrap_or(usize::MAX)), options.top, shown.doc.len());
             options.width = ring_rect.width();
             options.height = ring_rect.height();
             options.font_size = 10.5 * scale.min(1.2);
@@ -1805,6 +1813,7 @@ fn draw_made(
             room
         };
         let mut options = made_ring(m, settings, palette.raised);
+        options.top = map_view::turned_top(ui, egui::Id::unique(("protocol-turn", tab.id, step, ii)), options.top, m.piece.doc.len());
         options.width = canvas.width();
         options.height = canvas.height();
         options.font_size = (if other { 9.5 } else { 10.5 }) * scale.min(1.2);
@@ -2308,6 +2317,7 @@ fn detail(
                 return;
             };
             let mut options = shown.options;
+            options.top = map_view::turned_top(ui, turn_id(tab, c.step.unwrap_or(usize::MAX)), options.top, shown.doc.len());
             options.width = rect.width();
             options.height = rect.height();
             options.font_size = 12.5;
@@ -2365,7 +2375,7 @@ fn detail(
                         font_size: 12.0,
                         enzymes: marks,
                         selection: live.or(result.findings.parts.last().copied().filter(|_| result.findings.parts.len() > 1)),
-                        top: product_top(&result.findings.parts, doc.len()),
+                        top: map_view::turned_top(ui, turn_id(tab, step), product_top(&result.findings.parts, doc.len()), doc.len()),
                         title: Some("New plasmid".into()),
                         colors: settings.colors,
                         show_primers: false,
@@ -2433,7 +2443,8 @@ fn marking_map(
     let (len, circular) = (doc.len(), doc.is_circular());
     let span = marking.and_then(|(a, b)| map_view::drag_span(a, b, len, circular));
     // The stretch selected in the sequence under the map shows while nothing is dragged here.
-    let Some(map) = plasmid_map(tab, board, card, near, settings, palette, rect.size(), span.or(live), measure) else { return };
+    let turn = |top, len| map_view::turned_top(ui, turn_id(tab, step), top, len);
+    let Some(map) = plasmid_map(tab, board, card, near, settings, palette, rect.size(), span.or(live), measure, turn) else { return };
     paint(&ui.painter_at(rect), &map.scene, rect.min);
     if !interactive {
         return;
@@ -2599,7 +2610,8 @@ struct PlasmidMap<'a> {
 
 /// The detailed map of plasmid card `card` at `size`: the part (or the stretch `marking` being
 /// dragged across) shaded, the enzymes nearest the part on each side marked, and the chosen cuts
-/// drawn in the accent colour.
+/// drawn in the accent colour. `turn` gives the base drawn at the top on the way to the one the
+/// part asks for, so the map can turn there over a few frames.
 #[allow(clippy::too_many_arguments)]
 fn plasmid_map<'a>(
     tab: &ProtocolTab,
@@ -2611,6 +2623,7 @@ fn plasmid_map<'a>(
     size: egui::Vec2,
     marking: Option<Span>,
     measure: &EguiMeasure,
+    turn: impl FnOnce(usize, usize) -> usize,
 ) -> Option<PlasmidMap<'a>> {
     let (step, setting) = map_of(board, card)?;
     let template = &tab.run.steps.get(step)?.outputs.first()?.doc;
@@ -2628,6 +2641,7 @@ fn plasmid_map<'a>(
         }
     }
     let top = view.as_ref().map(|v| v.top).or_else(|| copied.map(|(r, len, _)| (r.start + r.len() / 2) % len)).unwrap_or(0);
+    let top = turn(top, template.len().max(1));
     // A PCR's primers are drawn in place of the map's own.
     let mut doc = template.clone();
     if !primers.is_empty() {
@@ -4219,7 +4233,8 @@ mod tests {
             let card = laid.card_of(step).unwrap();
             let rect = picture_rect(tab, &laid, card, self.area);
             let measure = EguiMeasure { ctx: &self.ctx };
-            let map = plasmid_map(tab, &laid, card, near.as_ref(), &ViewSettings::default(), &Palette::get(false), rect.size(), None, &measure).unwrap();
+            let map = plasmid_map(tab, &laid, card, near.as_ref(), &ViewSettings::default(), &Palette::get(false), rect.size(), None, &measure, |top, _| top)
+                .unwrap();
             (map.scene, rect, map.top)
         }
     }

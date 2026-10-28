@@ -1698,8 +1698,9 @@ impl SlopGeneApp {
                     }
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        let theme = if self.settings.dark { "Light" } else { "Dark" };
-                        if ui.small_button(theme).on_hover_text("Toggle dark mode").clicked() {
+                        // The button names the mode it switches to.
+                        let (theme, hint) = if self.settings.dark { ("Light mode", "Switch to light mode") } else { ("Dark mode", "Switch to dark mode") };
+                        if ui.small_button(theme).on_hover_text(hint).clicked() {
                             actions.push(Action::ToggleDark);
                         }
                         let shortcut = if cfg!(target_os = "macos") { "⌘K" } else { "Ctrl K" };

@@ -26,7 +26,7 @@ mkdir -p docs/images
     wait 1.2
     click 508,345        # the GFP gene on the map
     wait 1.5
-    click 670,21         # Clone, in the top bar
+    click 631,21         # Clone, in the top bar
     wait 2.5
     click 373,385        # the cut of pGFP, which zooms into its map
     wait 2.2
@@ -50,7 +50,7 @@ mkdir -p docs/images
     wait 1.2
     click 508,400        # the mCherry gene on the map
     wait 1.5
-    click 670,21         # Clone, in the top bar
+    click 631,21         # Clone, in the top bar
     wait 2.5
     click 442,303        # the menu of the pCherry cut
     wait 1.5

@@ -72,6 +72,46 @@ pub(crate) fn circular_position(rect: Rect, p: Pos2, len: usize, top: usize) -> 
     ((angle / TAU * len as f32).round() as usize + top) % len.max(1)
 }
 
+/// How long a circular map takes to turn to a new top, in seconds: quick, but seen.
+const TURN_TIME: f64 = 0.3;
+
+/// A circular map on its way round to a new top: the base that stood at the top when the turn
+/// began, the base it turns to, and when it began.
+#[derive(Clone, Copy)]
+struct Turn {
+    from: f32,
+    to: usize,
+    began: f64,
+}
+
+/// The base at 12 o'clock this frame of a circular map of `len` bases that is asked to show
+/// `target` there. The map starts where it is first asked to. From then on it turns to each new
+/// top the short way round over [`TURN_TIME`], fast at first and settling at the end, so the eye
+/// follows the part as it moves instead of losing it in a jump. `id` tells one map from another.
+pub(crate) fn turned_top(ui: &egui::Ui, id: egui::Id, target: usize, len: usize) -> usize {
+    let len = len.max(1);
+    let now = ui.input(|i| i.time);
+    let mut turn: Turn = ui.data(|d| d.get_temp(id)).unwrap_or(Turn { from: target as f32, to: target, began: now - TURN_TIME });
+    // The way from the turn's start to its end, in bases: the short way round, so the map never
+    // spins most of a circle to move a little.
+    let way = |turn: &Turn| (turn.to as f32 - turn.from + len as f32 / 2.0).rem_euclid(len as f32) - len as f32 / 2.0;
+    // Where the turn stands at `now`, eased so that it moves fast first and settles.
+    let standing = |turn: &Turn| {
+        let part = ((now - turn.began) / TURN_TIME).clamp(0.0, 1.0) as f32;
+        (turn.from + way(turn) * (1.0 - (1.0 - part).powi(3))).rem_euclid(len as f32)
+    };
+    // A new top starts a turn from where the map stands now, even in the middle of a turn.
+    if turn.to != target {
+        turn = Turn { from: standing(&turn), to: target, began: now };
+    }
+    let shown = standing(&turn);
+    if now - turn.began < TURN_TIME {
+        ui.ctx().request_repaint();
+    }
+    ui.data_mut(|d| d.insert_temp(id, turn));
+    (shown.round() as usize) % len
+}
+
 /// Sequence position under a point of a linear map drawn in `rect`.
 pub(crate) fn linear_position(rect: Rect, p: Pos2, len: usize) -> usize {
     let scale = (rect.width() - 2.0 * LINEAR_MARGIN) / len.max(1) as f32;
@@ -270,5 +310,39 @@ fn describe(tab: &DocTab, tag: &Tag) -> String {
             None => String::new(),
         },
         _ => String::new(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// One frame at `time` of a map of 1000 bases asked to show `target` at the top.
+    fn frame(ctx: &egui::Context, time: f64, target: usize) -> usize {
+        let raw = egui::RawInput { time: Some(time), ..Default::default() };
+        let mut top = 0;
+        ctx.run_ui(raw, |ui| top = turned_top(ui, egui::Id::unique("turn-test"), target, 1000)).textures_delta.clear();
+        top
+    }
+
+    #[test]
+    fn a_map_turns_to_a_new_top_the_short_way_round_and_settles() {
+        let ctx = egui::Context::default();
+        // The first top shows at once, and stays while nothing asks for another.
+        assert_eq!(frame(&ctx, 0.0, 100), 100);
+        assert_eq!(frame(&ctx, 0.05, 100), 100);
+        // A top on the other side of the origin is reached backwards through the origin, the
+        // short way, over the turn's time: a third of the way in, the map has already turned
+        // most of the way (fast first), and it has settled at the end.
+        assert_eq!(frame(&ctx, 0.1, 900), 100, "the turn starts where the map stands");
+        let partway = frame(&ctx, 0.2, 900);
+        assert!((930..=975).contains(&partway), "partway {partway}");
+        assert_eq!(frame(&ctx, 0.4, 900), 900);
+        assert_eq!(frame(&ctx, 1.0, 900), 900);
+        // A new top in the middle of a turn starts from where the map stands then.
+        assert_eq!(frame(&ctx, 1.1, 300), 900);
+        let partway = frame(&ctx, 1.2, 300);
+        assert!(!(300..=900).contains(&partway), "partway {partway}");
+        assert_eq!(frame(&ctx, 1.5, 300), 300);
     }
 }
