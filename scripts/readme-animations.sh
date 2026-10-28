@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Record the README's animations with the desktop app, from the made-up plasmids in examples/maps.
+# Record the README's animations with the desktop app, from the made-up plasmids and the made-up
+# sequencing read in examples/maps.
 #
 #   bash scripts/readme-animations.sh
 #
@@ -70,5 +71,23 @@ mkdir -p docs/images
     wait 1.5
     click 245,625        # the join, which zooms into the new plasmid
     wait 3.5
+"
+# Checking a whole-plasmid sequencing read against its map. The map and the read are open as
+# tabs, Align opens the alignment view, the read is added from the open sequences, and two of the
+# differences are clicked in the inspector, which scrolls the aligned bases to them.
+"$app" examples/maps/pDoom.dna examples/maps/pDoom_clone3.fa --view map --size "$size"     --record docs/images/check-sequencing.gif --play "
+    wait 1.2
+    click 129,21         # the pDoom tab: the map the read is checked against
+    wait 1.0
+    click 566,21         # Align, in the top bar
+    wait 1.8
+    click 490,398        # Add an open sequence
+    wait 1.2
+    click 462,431        # pDoom_clone3, the sequencing read
+    wait 3.0
+    click 727,687        # the changed base at 1,900, which the rows scroll to
+    wait 3.0
+    click 727,627        # the four bases missing at 231
+    wait 3.0
 "
 ls -l docs/images/*.gif
