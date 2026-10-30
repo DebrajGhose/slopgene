@@ -37,6 +37,9 @@ pub fn summary(path: &std::path::Path, doc: &Document) -> Value {
     if doc.molecule.is_nucleic() {
         obj["gc_percent"] = json!((alphabet::gc_fraction(&doc.seq) * 1000.0).round() / 10.0);
     }
+    if doc.molecule == Molecule::Dna {
+        obj["methylation"] = json!(doc.methylation.describe());
+    }
     if doc.molecule == Molecule::Dna && !doc.is_circular() && (doc.ends.left != Overhang::Blunt || doc.ends.right != Overhang::Blunt) {
         obj["ends"] = json!({ "left": doc.ends.left.describe(), "right": doc.ends.right.describe() });
     }
@@ -85,8 +88,9 @@ pub fn show(path: &str, include_sequence: bool) -> Result<Output> {
     value["path"] = json!(path_text(&path));
 
     let seq_len = doc.len();
+    let methylation = if doc.molecule == Molecule::Dna { format!("  {}", doc.methylation.describe()) } else { String::new() };
     let mut text = format!(
-        "{}  {} {}  {}  {}\n",
+        "{}  {} {}  {}  {}{methylation}\n",
         doc.name,
         thousands(seq_len),
         if doc.molecule == Molecule::Protein { "aa" } else { "bp" },

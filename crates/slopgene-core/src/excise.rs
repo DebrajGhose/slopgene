@@ -12,7 +12,7 @@
 //! with ends that take the piece.
 
 use crate::digest::{digest, ends_compatible, overhang_bases};
-use crate::enzymes::{Cut, Enzyme, cutting_sites_by_enzyme, find_sites};
+use crate::enzymes::{Cut, Enzyme, cutting_sites_by_enzyme, find_sites_in};
 use crate::error::{Result, invalid};
 use crate::model::*;
 use crate::render::thousands;
@@ -278,7 +278,7 @@ fn cut_end(doc: &Document, cut: &Cut) -> (Overhang, String) {
 
 /// Every distinct cut of each enzyme in a molecule, by enzyme name, in position order.
 fn cuts_by_enzyme(doc: &Document, enzymes: &[&Enzyme]) -> HashMap<String, Vec<Cut>> {
-    let sites = find_sites(&doc.seq, doc.is_circular(), enzymes);
+    let sites = find_sites_in(doc, enzymes);
     let mut out: HashMap<String, Vec<Cut>> = HashMap::new();
     for (name, group) in cutting_sites_by_enzyme(&sites) {
         let mut cuts: Vec<Cut> = group.iter().flat_map(|s| s.cuts.iter().copied()).collect();
@@ -513,8 +513,7 @@ mod tests {
 
     /// The common enzymes that cut a document, sorted, so a fixture can say what it holds.
     fn cutters(doc: &Document) -> Vec<String> {
-        let mut names: Vec<String> =
-            crate::enzymes::cut_counts(&doc.seq, doc.is_circular(), &common()).into_iter().filter(|(_, n)| *n > 0).map(|(e, _)| e.name.clone()).collect();
+        let mut names: Vec<String> = crate::enzymes::cut_counts_in(doc, &common()).into_iter().filter(|(_, n)| *n > 0).map(|(e, _)| e.name.clone()).collect();
         names.sort();
         names
     }

@@ -40,6 +40,8 @@ fn build_scene(ctx: &egui::Context, tab: &mut DocTab, settings: &ViewSettings, s
     let palette = Palette::get(settings.dark);
     let aligning = tab.view == View::Alignment;
     let marks = if settings.show_enzymes && !aligning { tab.sites().0.to_vec() } else { Vec::new() };
+    let blocked: Vec<slopgene_core::render::SiteMark> =
+        if settings.show_enzymes && !aligning { tab.blocked_sites().iter().map(|(m, _)| m.clone()).collect() } else { Vec::new() };
     let alignments = if aligning { tab.alignments.tracks() } else { Vec::new() };
     let mut theme = if settings.dark { Theme::dark() } else { Theme::light() };
     theme.background = to_rgba(palette.canvas);
@@ -54,6 +56,7 @@ fn build_scene(ctx: &egui::Context, tab: &mut DocTab, settings: &ViewSettings, s
         font_size: 11.5,
         show_primers: settings.show_primers,
         enzymes: marks,
+        blocked_enzymes: blocked,
         selection: tab.selection,
         cursor: Some(tab.cursor),
         highlight,
@@ -295,7 +298,10 @@ fn describe(tab: &DocTab, tag: &Tag) -> String {
         },
         Tag::Enzyme(name, pos) => {
             let site = enzymes::EnzymeDb::builtin().get(name).map(|e| e.site_with_cuts()).unwrap_or_default();
-            format!("{name}  {site}\ncuts after {pos}")
+            match tab.blocked_reason(name, *pos) {
+                Some(why) => format!("{name}  {site}\nthe site at {pos} is {why}, so it is not cut"),
+                None => format!("{name}  {site}\ncuts after {pos}"),
+            }
         }
         Tag::Primer(uid) => match tab.doc.primers.iter().find(|p| p.uid == *uid) {
             Some(p) => format!("{} ({} nt)\n{}", p.name, p.seq.len(), p.seq),

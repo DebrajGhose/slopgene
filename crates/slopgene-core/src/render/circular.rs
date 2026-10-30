@@ -262,10 +262,15 @@ pub fn render(doc: &Document, options: &MapOptions, measure: &dyn TextMeasure) -
 
     // Enzyme sites: a short tick across the backbone and a label. A chosen cut is drawn in the
     // accent colour, longer and bolder, and its label outranks every other.
-    for (mark, chosen) in super::all_marks(options) {
+    for (mark, style) in super::all_marks(options) {
         let a = angle_of(mark.pos as f64);
         let tag = Tag::Enzyme(mark.name.clone(), mark.pos);
-        let (color, width, reach) = if chosen { (theme.accent, 2.4, 7.0) } else { (theme.enzyme, 1.2, 3.0) };
+        let chosen = style == super::MarkStyle::Chosen;
+        let (color, width, reach) = match style {
+            super::MarkStyle::Chosen => (theme.accent, 2.4, 7.0),
+            super::MarkStyle::Plain => (theme.enzyme, 1.2, 3.0),
+            super::MarkStyle::Blocked => (theme.faint, 1.2, 3.0),
+        };
         scene.push(
             Shape::Polyline {
                 points: vec![polar(center, radius - thickness / 2.0 - 1.0, a), polar(center, radius + thickness / 2.0 + reach, a)],
@@ -278,9 +283,13 @@ pub fn render(doc: &Document, options: &MapOptions, measure: &dyn TextMeasure) -
             text: format!("{} ({})", mark.name, mark.pos.max(1)),
             angle: a,
             from_radius: radius + thickness / 2.0 + reach,
-            color,
+            color: if style == super::MarkStyle::Blocked { theme.muted } else { color },
             tag,
-            priority: if chosen { 5000.0 } else { 100.0 },
+            priority: match style {
+                super::MarkStyle::Chosen => 5000.0,
+                super::MarkStyle::Plain => 100.0,
+                super::MarkStyle::Blocked => 50.0,
+            },
             bold: chosen,
         });
     }

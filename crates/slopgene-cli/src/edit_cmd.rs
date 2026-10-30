@@ -20,6 +20,7 @@ pub enum EditOp {
     Invert { range: String },
     Origin { at: usize },
     Topology { topology: String },
+    Methylation { state: String },
     Describe { text: String },
     AddFeature { name: String, kind: String, range: String, strand: String, color: Option<String>, qualifiers: Vec<String> },
     RemoveFeature { name: String, all: bool },
@@ -39,6 +40,7 @@ impl EditOp {
             EditOp::Invert { .. } => "invert",
             EditOp::Origin { .. } => "origin",
             EditOp::Topology { .. } => "topology",
+            EditOp::Methylation { .. } => "methylation",
             EditOp::Describe { .. } => "describe",
             EditOp::AddFeature { .. } => "add-feature",
             EditOp::RemoveFeature { .. } => "remove-feature",
@@ -122,6 +124,11 @@ pub fn apply(doc: &mut Document, op: &EditOp) -> Result<String> {
             let t = Topology::parse(topology).ok_or_else(|| anyhow!("topology must be linear or circular"))?;
             edit::set_topology(doc, t);
             format!("topology set to {}", t.name())
+        }
+        EditOp::Methylation { state } => {
+            let methylation = doc.methylation.changed(state).map_err(|e| anyhow!(e))?;
+            doc.methylation = methylation;
+            format!("methylation set to {}", methylation.describe())
         }
         EditOp::Describe { text } => {
             doc.meta.description = text.clone();

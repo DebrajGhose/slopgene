@@ -125,6 +125,7 @@ The format of a file is detected from its contents, so the extension does not ne
 | `doc.len() -> int` | The number of bases or residues, the same as `doc.length`. |
 | `doc.seq` | The sequence as a string. |
 | `doc.topology` | `"linear"` or `"circular"`. Assigning either value changes the topology. |
+| `doc.methylation` | `"Dam+ Dcm+ EcoKI+"`, `"unmethylated"` or a mix. Assigning words such as `"dam- dcm-"`, `"none"` or `"ecoli"` changes it, and with it the sites that methylation blocks. |
 | `doc.molecule` | `"dna"`, `"rna"` or `"protein"`. |
 | `doc.is_circular` | Whether the molecule is circular. |
 | `doc.gc` | GC content in percent. |
@@ -216,8 +217,9 @@ doc.render("pUC19.png", #{ width: 1200, height: 900, enzymes: "EcoRI,BamHI,HindI
 | `doc.sites(enzymes) -> [map]` | Every cutting site as a map with enzyme, start, end, strand and cut, in position order. |
 | `doc.cut_counts(enzymes) -> map` | How many times each enzyme cuts, keyed by enzyme name. |
 | `doc.unique_cutters(enzymes) -> [map]` | The enzymes that cut exactly once, as maps with enzyme and cut. |
+| `doc.blocked_sites(enzymes) -> [map]` | The sites that the document's methylation keeps from cutting, as maps with enzyme, start, end, strand, cut, blocked_by and reason. |
 | `doc.digest(enzymes) -> [map]` | The fragments, each with length, start, end, the enzyme and end type on each side, and the fragment itself as doc. |
-| `enzyme(name) -> map` | One enzyme with its name, site, site_with_cuts and suppliers. |
+| `enzyme(name) -> map` | One enzyme with its name, site, site_with_cuts, suppliers and methylation (what Dam, Dcm, CpG, EcoBI and EcoKI do to it). |
 | `enzymes(spec) -> [string]` | The enzyme names of a set or of a comma-separated list. |
 
 A digest fragment has the keys `length`, `start`, `end`, `left_enzyme`, `right_enzyme`, `left_end`, `right_end` and `doc`.

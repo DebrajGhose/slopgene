@@ -19,7 +19,7 @@ pub use api::{API, ApiEntry, api_json, api_text};
 
 use rhai::{Array, Dynamic, Engine, EvalAltResult, Map, Scope};
 use slopgene_core::digest::{circularize, digest, ligate};
-use slopgene_core::enzymes::{Enzyme, EnzymeDb, find_sites};
+use slopgene_core::enzymes::{Enzyme, EnzymeDb, Methylase, cut_counts_in, find_sites_in};
 use slopgene_core::io::{self, Format};
 use slopgene_core::primers::{self, BindingRules, TmConditions};
 use slopgene_core::protocol::{self, Change, NewFile, Orientation, Protocol, Run};
@@ -90,6 +90,14 @@ fn find_feature<'a>(doc: &'a Document, name: &str) -> R<(usize, &'a Feature)> {
         (None, _) => err(format!("no feature named '{name}'")),
         (Some(_), Some(_)) => err(format!("several features are named '{name}'; use \"#N\"")),
     }
+}
+
+/// A new DNA document as a script makes it: methylated as DNA from E. coli is, which is what
+/// SnapGene assumes of a new file too. `doc.methylation = "none"` says otherwise.
+fn fresh_dna(name: &str, seq: Vec<u8>, topology: Topology) -> Document {
+    let mut doc = Document::new_dna(name, seq, topology);
+    doc.methylation = Methylation::E_COLI;
+    doc
 }
 
 fn clean(bases: &str) -> R<Vec<u8>> {
@@ -202,10 +210,10 @@ fn register_documents(engine: &mut Engine) {
         let docs = core(io::read_path(path))?;
         Ok(docs.into_iter().map(|doc| Dynamic::from(Doc { doc, path: Some(PathBuf::from(path)) })).collect())
     });
-    engine.register_fn("new_dna", |name: &str, seq: &str| -> R<Doc> { Ok(Doc { doc: Document::new_dna(name, clean(seq)?, Topology::Linear), path: None }) });
+    engine.register_fn("new_dna", |name: &str, seq: &str| -> R<Doc> { Ok(Doc { doc: fresh_dna(name, clean(seq)?, Topology::Linear), path: None }) });
     engine.register_fn("new_dna", |name: &str, seq: &str, topology: &str| -> R<Doc> {
         let t = Topology::parse(topology).ok_or("topology must be linear or circular")?;
-        Ok(Doc { doc: Document::new_dna(name, clean(seq)?, t), path: None })
+        Ok(Doc { doc: fresh_dna(name, clean(seq)?, t), path: None })
     });
     engine.register_fn("from_json", |text: &str| -> R<Doc> {
         let value: serde_json::Value = serde_json::from_str(text).map_err(|e| e.to_string())?;
@@ -221,6 +229,7 @@ fn register_documents(engine: &mut Engine) {
     engine.register_fn("len", |d: &mut Doc| d.doc.len() as i64);
     engine.register_get("seq", |d: &mut Doc| d.doc.seq_str());
     engine.register_get("topology", |d: &mut Doc| d.doc.topology.name().to_string());
+    engine.register_get("methylation", |d: &mut Doc| d.doc.methylation.describe());
     engine.register_get("molecule", |d: &mut Doc| d.doc.molecule.name().to_string());
     engine.register_get("is_circular", |d: &mut Doc| d.doc.is_circular());
     engine.register_get("gc", |d: &mut Doc| alphabet::gc_fraction(&d.doc.seq) * 100.0);
@@ -306,6 +315,15 @@ fn register_documents(engine: &mut Engine) {
         let t = Topology::parse(t).ok_or("topology must be linear or circular")?;
         edit::set_topology(&mut d.doc, t);
         Ok(())
+    });
+    engine.register_set("methylation", |d: &mut Doc, state: &str| -> R<()> {
+        match d.doc.methylation.changed(state) {
+            Ok(methylation) => {
+                d.doc.methylation = methylation;
+                Ok(())
+            }
+            Err(e) => err(e),
+        }
     });
     engine.register_fn("add_feature", |d: &mut Doc, name: &str, kind: &str, start: i64, end: i64, strand: &str| -> R<Dynamic> {
         let span = span_of(&d.doc, start, end)?;
@@ -440,7 +458,7 @@ fn register_analysis(engine: &mut Engine) {
     engine.register_fn("sites", |d: &mut Doc, spec: &str| -> R<Array> {
         let enzymes = enzymes_from(spec)?;
         let n = d.doc.len();
-        Ok(find_sites(&d.doc.seq, d.doc.is_circular(), &enzymes)
+        Ok(find_sites_in(&d.doc, &enzymes)
             .into_iter()
             .filter(|s| !s.cuts.is_empty())
             .map(|s| {
@@ -452,10 +470,26 @@ fn register_analysis(engine: &mut Engine) {
     engine.register_fn("cut_counts", |d: &mut Doc, spec: &str| -> R<Map> {
         let enzymes = enzymes_from(spec)?;
         let mut out = Map::new();
-        for (e, n) in slopgene_core::enzymes::cut_counts(&d.doc.seq, d.doc.is_circular(), &enzymes) {
+        for (e, n) in cut_counts_in(&d.doc, &enzymes) {
             out.insert(e.name.as_str().into(), (n as i64).into());
         }
         Ok(out)
+    });
+    engine.register_fn("blocked_sites", |d: &mut Doc, spec: &str| -> R<Array> {
+        let enzymes = enzymes_from(spec)?;
+        let n = d.doc.len();
+        Ok(find_sites_in(&d.doc, &enzymes)
+            .into_iter()
+            .filter_map(|s| s.blocked.map(|block| (s, block)))
+            .map(|(s, block)| {
+                let (a, b) = Span::new(s.start, s.start + s.len).to_1based(n);
+                let cut = s.blocked_cuts.first().map_or(a, |c| c.pos.max(1));
+                to_dyn(serde_json::json!({
+                    "enzyme": s.enzyme, "start": a, "end": b, "strand": s.strand.name(), "cut": cut,
+                    "blocked_by": block.methylase.name(), "reason": block.describe(),
+                }))
+            })
+            .collect())
     });
     engine.register_fn("unique_cutters", |d: &mut Doc, spec: &str| -> R<Array> {
         let marks = render::unique_cutter_marks(&d.doc, &enzymes_from(spec)?);
@@ -798,7 +832,11 @@ fn register_utilities(engine: &mut Engine) {
     });
     engine.register_fn("enzyme", |name: &str| -> R<Dynamic> {
         let e = db().get(name).ok_or_else(|| format!("unknown enzyme '{name}'"))?;
-        Ok(to_dyn(serde_json::json!({ "name": e.name, "site": e.site_str(), "site_with_cuts": e.site_with_cuts(), "suppliers": e.supplier_names() })))
+        let methylation: serde_json::Map<String, serde_json::Value> =
+            Methylase::ALL.iter().map(|m| (m.name().to_string(), serde_json::json!(e.sensitivity.get(*m).name()))).collect();
+        Ok(to_dyn(serde_json::json!({
+            "name": e.name, "site": e.site_str(), "site_with_cuts": e.site_with_cuts(), "suppliers": e.supplier_names(), "methylation": methylation,
+        })))
     });
     engine.register_fn("enzymes", |spec: &str| -> R<Array> { Ok(enzymes_from(spec)?.into_iter().map(|e| Dynamic::from(e.name.clone())).collect()) });
     engine.register_fn("today", clock::today_iso);
@@ -835,6 +873,23 @@ mod tests {
         .unwrap();
         let values: Vec<i64> = result.into_array().unwrap().into_iter().map(|v| v.as_int().unwrap()).collect();
         assert_eq!(values, vec![32, 7, 12, 1, 2]);
+    }
+
+    #[test]
+    fn methylation_is_a_property_that_decides_the_blocked_sites() {
+        // A new document is methylated as E. coli leaves it, so the XbaI site that overlaps GATC
+        // is blocked; without Dam it cuts.
+        let result = eval(
+            r#"
+            let d = new_dna("x", "AAAAAAAAAATCTAGATCAAAAAAAAAAAAAAAAAAAAAATCTAGAAAAAAAAAAA", "circular");
+            let before = [d.methylation, d.sites("XbaI").len(), d.blocked_sites("XbaI").len(), d.blocked_sites("XbaI")[0].reason];
+            d.methylation = "dam-";
+            before + [d.methylation, d.sites("XbaI").len(), d.blocked_sites("XbaI").len()]
+            "#,
+        )
+        .unwrap();
+        let values: Vec<String> = result.into_array().unwrap().into_iter().map(|v| v.to_string()).collect();
+        assert_eq!(values, vec!["Dam+ Dcm+ EcoKI+", "1", "1", "blocked by Dam methylation", "Dam- Dcm+ EcoKI+", "2", "0"]);
     }
 
     #[test]

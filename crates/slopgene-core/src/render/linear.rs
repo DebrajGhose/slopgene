@@ -76,8 +76,8 @@ pub fn render(doc: &Document, options: &MapOptions, measure: &dyn TextMeasure) -
     let enzyme_intervals: Vec<(f32, f32)> = enzyme_labels
         .iter()
         .zip(&marks)
-        .map(|((t, x), (_, chosen))| {
-            let w = measure.text_width(t, font, *chosen);
+        .map(|((t, x), (_, style))| {
+            let w = measure.text_width(t, font, *style == super::MarkStyle::Chosen);
             (x - w / 2.0, x + w / 2.0)
         })
         .collect();
@@ -207,14 +207,23 @@ pub fn render(doc: &Document, options: &MapOptions, measure: &dyn TextMeasure) -
 
     // Enzyme ticks with leaders up to their label rows. A chosen cut is drawn in the accent colour
     // and longer.
-    for (ii, (mark, chosen)) in marks.iter().enumerate() {
+    for (ii, (mark, style)) in marks.iter().enumerate() {
         let x = enzyme_labels[ii].1;
         let label_y = enzymes_top + enzyme_rows[ii] as f32 * line + line / 2.0;
         let tag = Tag::Enzyme(mark.name.clone(), mark.pos);
-        let (color, width, reach) = if *chosen { (theme.accent, 2.4, 8.0) } else { (theme.enzyme, 1.2, 5.0) };
+        let chosen = *style == super::MarkStyle::Chosen;
+        let (color, width, reach) = match style {
+            super::MarkStyle::Chosen => (theme.accent, 2.4, 8.0),
+            super::MarkStyle::Plain => (theme.enzyme, 1.2, 5.0),
+            super::MarkStyle::Blocked => (theme.faint, 1.2, 5.0),
+        };
+        let text_color = if *style == super::MarkStyle::Blocked { theme.muted } else { color };
         scene.push(Shape::Polyline { points: vec![[x, label_y + font * 0.6], [x, backbone_y + 4.0]], color: theme.faint, width: 0.8 }, tag.clone());
         scene.push(Shape::Polyline { points: vec![[x, backbone_y - reach], [x, backbone_y + reach]], color, width }, tag.clone());
-        scene.push(Shape::Text { pos: [x, label_y], text: enzyme_labels[ii].0.clone(), size: font, color, anchor: Anchor::Middle, bold: *chosen }, tag);
+        scene.push(
+            Shape::Text { pos: [x, label_y], text: enzyme_labels[ii].0.clone(), size: font, color: text_color, anchor: Anchor::Middle, bold: chosen },
+            tag,
+        );
     }
 
     // Aligned sequences: a line each under the features, drawn as the rings of a circular map

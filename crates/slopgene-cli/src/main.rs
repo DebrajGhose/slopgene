@@ -740,6 +740,9 @@ enum EditCommand {
     },
     /// Make the sequence linear or circular.
     Topology { topology: String },
+    /// Set the DNA's methylation, which decides the sites that Dam, Dcm or EcoKI block: words
+    /// such as "dam- dcm-" or "ecoki+" change one methylase each, "none" clears all, "ecoli" sets all.
+    Methylation { state: String },
     /// Set the description.
     Describe { text: String },
     /// Add a feature.
@@ -848,6 +851,7 @@ fn run(command: Command) -> anyhow::Result<Output> {
                 EditCommand::Invert { range } => EditOp::Invert { range },
                 EditCommand::Origin { at } => EditOp::Origin { at },
                 EditCommand::Topology { topology } => EditOp::Topology { topology },
+                EditCommand::Methylation { state } => EditOp::Methylation { state },
                 EditCommand::Describe { text } => EditOp::Describe { text },
                 EditCommand::AddFeature { name, kind, range, strand, color, qualifiers } => EditOp::AddFeature { name, kind, range, strand, color, qualifiers },
                 EditCommand::RemoveFeature { name, all } => EditOp::RemoveFeature { name, all },

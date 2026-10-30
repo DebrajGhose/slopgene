@@ -54,6 +54,11 @@ pub const API: &[ApiEntry] = &[
     entry(PROPERTIES, "doc.len() -> int", "The number of bases or residues, the same as `doc.length`."),
     entry(PROPERTIES, "doc.seq", "The sequence as a string."),
     entry(PROPERTIES, "doc.topology", "\"linear\" or \"circular\". Assigning either value changes the topology."),
+    entry(
+        PROPERTIES,
+        "doc.methylation",
+        "\"Dam+ Dcm+ EcoKI+\", \"unmethylated\" or a mix. Assigning words such as \"dam- dcm-\", \"none\" or \"ecoli\" changes it, and with it the sites that methylation blocks.",
+    ),
     entry(PROPERTIES, "doc.molecule", "\"dna\", \"rna\" or \"protein\"."),
     entry(PROPERTIES, "doc.is_circular", "Whether the molecule is circular."),
     entry(PROPERTIES, "doc.gc", "GC content in percent."),
@@ -93,10 +98,19 @@ pub const API: &[ApiEntry] = &[
     entry(ENZYMES, "doc.unique_cutters(enzymes) -> [map]", "The enzymes that cut exactly once, as maps with enzyme and cut."),
     entry(
         ENZYMES,
+        "doc.blocked_sites(enzymes) -> [map]",
+        "The sites that the document's methylation keeps from cutting, as maps with enzyme, start, end, strand, cut, blocked_by and reason.",
+    ),
+    entry(
+        ENZYMES,
         "doc.digest(enzymes) -> [map]",
         "The fragments, each with length, start, end, the enzyme and end type on each side, and the fragment itself as doc.",
     ),
-    entry(ENZYMES, "enzyme(name) -> map", "One enzyme with its name, site, site_with_cuts and suppliers."),
+    entry(
+        ENZYMES,
+        "enzyme(name) -> map",
+        "One enzyme with its name, site, site_with_cuts, suppliers and methylation (what Dam, Dcm, CpG, EcoBI and EcoKI do to it).",
+    ),
     entry(ENZYMES, "enzymes(spec) -> [string]", "The enzyme names of a set or of a comma-separated list."),
     entry(ANALYSIS, "doc.find(pattern) -> [map]", "Matches of a DNA motif on both strands, as maps with start, end, strand and mismatches."),
     entry(ANALYSIS, "doc.find(pattern, mismatches) -> [map]", "Matches of a DNA motif with up to this many mismatched bases."),

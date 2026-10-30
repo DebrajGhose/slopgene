@@ -6,7 +6,7 @@ use anyhow::{Result, anyhow, bail};
 use rayon::prelude::*;
 use serde_json::{Value, json};
 use slopgene_core::digest::digest;
-use slopgene_core::enzymes::{ENZYME_SETS, EndType, Enzyme, EnzymeDb, find_sites};
+use slopgene_core::enzymes::{ENZYME_SETS, Effect, EndType, Enzyme, EnzymeDb, Methylase, blocked_groups, find_sites_in};
 use slopgene_core::gel::{GelOptions, Ladder, Lane, render_gel};
 use slopgene_core::render::thousands;
 use slopgene_core::*;
@@ -28,7 +28,29 @@ fn enzyme_json(e: &Enzyme, db: &EnzymeDb) -> Value {
         "type_iis": e.cuts_outside_site(),
         "suppliers": e.supplier_names(),
         "isoschizomers": isoschizomers,
+        "methylation": methylation_json(e),
     })
+}
+
+/// The enzyme's response to each methylase, keyed by the methylase's name.
+fn methylation_json(e: &Enzyme) -> Value {
+    let mut map = serde_json::Map::new();
+    for m in Methylase::ALL {
+        map.insert(m.name().to_string(), json!(e.sensitivity.get(m).name()));
+    }
+    Value::Object(map)
+}
+
+/// The methylases that block, impair or are needed by the enzyme, in a few words, or nothing.
+fn methylation_notes(e: &Enzyme) -> String {
+    Methylase::ALL
+        .iter()
+        .filter_map(|m| {
+            let effect = e.sensitivity.get(*m);
+            matches!(effect, Effect::Blocked | Effect::Impaired | Effect::Variable | Effect::Required).then(|| format!("{} {}", m.name(), effect.describe()))
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// Pick enzymes from `--enzymes`: a set name (common, 6+, neb, golden-gate, ...) or a list.
@@ -50,7 +72,7 @@ pub fn list(set: Option<&str>, search: Option<&str>) -> Result<Output> {
         let q = q.to_ascii_uppercase();
         enzymes.retain(|e| e.name.to_ascii_uppercase().contains(&q) || e.site_str().contains(&q));
     }
-    let mut rows = vec![vec!["enzyme".into(), "site".into(), "ends".into(), "suppliers".into()]];
+    let mut rows = vec![vec!["enzyme".into(), "site".into(), "ends".into(), "suppliers".into(), "methylation".into()]];
     let mut values = Vec::new();
     for e in &enzymes {
         let ends = match e.end_type() {
@@ -58,7 +80,7 @@ pub fn list(set: Option<&str>, search: Option<&str>) -> Result<Output> {
             EndType::FivePrime(n) => format!("5' +{n}"),
             EndType::ThreePrime(n) => format!("3' +{n}"),
         };
-        rows.push(vec![e.name.clone(), e.site_with_cuts(), ends, e.suppliers.clone()]);
+        rows.push(vec![e.name.clone(), e.site_with_cuts(), ends, e.suppliers.clone(), methylation_notes(e)]);
         values.push(enzyme_json(e, db));
     }
     let mut text = table(&rows);
@@ -73,13 +95,15 @@ pub fn info(names: &[String]) -> Result<Output> {
     let mut values = Vec::new();
     for e in enzymes {
         let v = enzyme_json(e, db);
+        let methylation: Vec<String> = Methylase::ALL.iter().map(|m| format!("{} {}", m.name(), e.sensitivity.get(*m).describe())).collect();
         text.push_str(&format!(
-            "{}  {}\n  ends: {}\n  suppliers: {}\n  isoschizomers: {}\n",
+            "{}  {}\n  ends: {}\n  suppliers: {}\n  isoschizomers: {}\n  methylation: {}\n",
             e.name,
             e.site_with_cuts(),
             v["ends"]["type"].as_str().unwrap_or(""),
             e.supplier_names().join(", "),
-            v["isoschizomers"].as_array().map(|a| a.iter().filter_map(|x| x.as_str()).collect::<Vec<_>>().join(", ")).unwrap_or_default()
+            v["isoschizomers"].as_array().map(|a| a.iter().filter_map(|x| x.as_str()).collect::<Vec<_>>().join(", ")).unwrap_or_default(),
+            methylation.join(", ")
         ));
         values.push(v);
     }
@@ -101,7 +125,9 @@ pub fn sets() -> Result<Output> {
 pub fn import_rebase(emboss_e: &str, emboss_r: &str, output: &str) -> Result<Output> {
     let e = std::fs::read_to_string(emboss_e)?;
     let r = std::fs::read_to_string(emboss_r)?;
-    let db = EnzymeDb::from_rebase_emboss(&e, &r)?;
+    let mut db = EnzymeDb::from_rebase_emboss(&e, &r)?;
+    // The EMBOSS files say nothing about methylation, so the known sensitivities carry over.
+    db.keep_sensitivity_of(EnzymeDb::builtin());
     std::fs::write(output, db.to_tsv())?;
     let text = format!("wrote {} enzymes ({}) to {output}\nuse it with: set SLOPGENE_ENZYMES={output}", db.len(), db.source);
     Ok(Output::new(json!({ "enzymes": db.len(), "source": db.source, "output": output }), text))
@@ -153,8 +179,20 @@ fn site_report(
     many: bool,
 ) -> (Value, String) {
     let seq_len = doc.len();
-    let found = find_sites(&doc.seq, doc.is_circular(), enzymes);
+    let found = find_sites_in(doc, enzymes);
     let by_enzyme = slopgene_core::enzymes::cutting_sites_by_enzyme(&found);
+    // Sites that the molecule's methylation keeps from cutting, with the reason for each.
+    let mut blocked_sites: Vec<Value> = Vec::new();
+    let blocked_text: Vec<String> = blocked_groups(&found).iter().map(|g| g.describe()).collect();
+    for s in found.iter().filter(|s| s.blocked.is_some()) {
+        let Some(block) = s.blocked else { continue };
+        let at = s.blocked_cuts.first().map_or(s.start + 1, |c| c.pos.max(1));
+        let (a, b) = Span::new(s.start, s.start + s.len).to_1based(seq_len);
+        blocked_sites.push(json!({
+            "enzyme": s.enzyme, "start": a, "end": b, "strand": s.strand.name(), "cut": at,
+            "blocked_by": block.methylase.name(), "reason": block.describe(),
+        }));
+    }
     let mut rows = vec![vec!["enzyme".into(), "site".into(), "cuts".into(), "positions".into()]];
     let mut per_enzyme = Vec::new();
     let mut none = Vec::new();
@@ -177,13 +215,25 @@ fn site_report(
             .iter()
             .map(|s| {
                 let (a, b) = Span::new(s.start, s.start + s.len).to_1based(seq_len);
-                json!({ "start": a, "end": b, "strand": s.strand.name(), "cut": s.cuts[0].pos.max(1) })
+                let mut site = json!({ "start": a, "end": b, "strand": s.strand.name(), "cut": s.cuts[0].pos.max(1) });
+                if let Some(impaired) = s.impaired {
+                    site["impaired"] = json!(impaired.describe());
+                }
+                site
             })
             .collect();
         rows.push(vec![e.name.clone(), e.site_with_cuts(), count.to_string(), positions.iter().map(|p| p.to_string()).collect::<Vec<_>>().join(", ")]);
         per_enzyme.push(json!({ "name": e.name, "site": e.site_str(), "cuts": count, "positions": positions, "sites": site_list }));
     }
-    let mut v = json!({ "path": path_text(path), "name": doc.name, "length": seq_len, "topology": doc.topology.name(), "enzymes": per_enzyme });
+    let mut v = json!({
+        "path": path_text(path),
+        "name": doc.name,
+        "length": seq_len,
+        "topology": doc.topology.name(),
+        "methylation": doc.methylation.describe(),
+        "enzymes": per_enzyme,
+        "blocked": blocked_sites,
+    });
     if noncutters {
         v["noncutters"] = json!(none);
     }
@@ -192,6 +242,9 @@ fn site_report(
         text.push_str(&format!("== {} ({} bp)\n", doc.name, thousands(seq_len)));
     }
     text.push_str(&table(&rows));
+    if !blocked_text.is_empty() {
+        text.push_str(&format!("blocked by methylation ({}): {}\n", doc.methylation.describe(), blocked_text.join("; ")));
+    }
     if noncutters && !none.is_empty() {
         text.push_str(&format!("does not cut: {}\n", none.join(", ")));
     }
@@ -259,10 +312,20 @@ pub fn digest_cmd(path: &str, spec: &str, out_dir: Option<&str>, gel: Option<&st
         "enzymes": enzymes.iter().map(|e| e.name.clone()).collect::<Vec<_>>(),
         "fragments": fragments,
         "noncutters": result.non_cutters,
+        "methylation": doc.methylation.describe(),
+        "blocked": result.blocked.iter().filter_map(|s| {
+            let block = s.blocked?;
+            let at = s.blocked_cuts.first().map_or(s.start + 1, |c| c.pos.max(1));
+            Some(json!({ "enzyme": s.enzyme, "cut": at, "blocked_by": block.methylase.name(), "reason": block.describe() }))
+        }).collect::<Vec<_>>(),
     });
     let mut text = table(&rows);
     if !result.non_cutters.is_empty() {
         text.push_str(&format!("does not cut: {}\n", result.non_cutters.join(", ")));
+    }
+    if !result.blocked.is_empty() {
+        let blocked: Vec<String> = blocked_groups(&result.blocked).iter().map(|g| g.describe()).collect();
+        text.push_str(&format!("blocked by methylation ({}): {}\n", doc.methylation.describe(), blocked.join("; ")));
     }
     if let Some(gel_path) = gel {
         let ladder = Ladder::get(ladder).ok_or_else(|| anyhow!("unknown ladder '{ladder}' (1kb, 1kb-plus, 100bp, generuler-1kb, generuler-1kb-plus)"))?;

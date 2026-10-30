@@ -5,7 +5,7 @@
 //! using the `slopgene` command line) changes it and there are no unsaved edits here, the
 //! document reloads by itself, so edits made outside the app appear live.
 
-use slopgene_core::enzymes::{EnzymeDb, find_sites};
+use slopgene_core::enzymes::{EnzymeDb, find_sites_in};
 use slopgene_core::primers::{self, BindingRules};
 use slopgene_core::render::SiteMark;
 use slopgene_core::*;
@@ -76,11 +76,13 @@ pub struct EnzymeCount {
     pub name: String,
     pub site: String,
     pub cuts: Vec<usize>,
+    /// The cuts the enzyme would make at sites that methylation blocks.
+    pub blocked: Vec<usize>,
 }
 
 /// Enzyme sites as last computed: the document revision, enzyme set and unique-only choice they
 /// were computed for, then the map marks and the per-enzyme counts.
-type SitesCache = (u64, String, bool, Vec<SiteMark>, Vec<EnzymeCount>);
+type SitesCache = (u64, String, bool, Vec<SiteMark>, Vec<EnzymeCount>, Vec<(SiteMark, String)>);
 
 pub struct DocTab {
     pub id: u64,
@@ -547,33 +549,66 @@ impl DocTab {
     /// Enzyme sites for maps and the enzymes panel, recomputed when the document or the enzyme
     /// choice changes.
     pub fn sites(&mut self) -> (&[SiteMark], &[EnzymeCount]) {
-        let fresh =
-            matches!(&self.sites_cache, Some((rev, set, unique, _, _)) if *rev == self.revision && *set == self.enzyme_set && *unique == self.unique_only);
-        if !fresh {
-            let db = EnzymeDb::builtin();
-            let enzymes = db.set(&self.enzyme_set).unwrap_or_default();
-            let found = find_sites(&self.doc.seq, self.doc.is_circular(), &enzymes);
-            let groups = slopgene_core::enzymes::cutting_sites_by_enzyme(&found);
-            let mut counts = Vec::new();
-            let mut marks = Vec::new();
-            for e in &enzymes {
-                let cuts: Vec<usize> = groups.get(e.name.as_str()).map(|g| g.iter().map(|s| s.cuts[0].pos).collect()).unwrap_or_default();
-                if cuts.is_empty() {
-                    continue;
-                }
-                if !self.unique_only || cuts.len() == 1 {
-                    for &c in &cuts {
-                        marks.push(SiteMark { name: e.name.clone(), pos: c });
-                    }
-                }
-                counts.push(EnzymeCount { name: e.name.clone(), site: e.site_with_cuts(), cuts });
-            }
-            marks.sort_by_key(|m| m.pos);
-            counts.sort_by(|a, b| a.cuts.len().cmp(&b.cuts.len()).then_with(|| a.name.cmp(&b.name)));
-            self.sites_cache = Some((self.revision, self.enzyme_set.clone(), self.unique_only, marks, counts));
-        }
-        let (_, _, _, marks, counts) = self.sites_cache.as_ref().unwrap();
+        self.refresh_sites();
+        let (_, _, _, marks, counts, _) = self.sites_cache.as_ref().unwrap();
         (marks, counts)
+    }
+
+    /// The sites of the shown enzymes that methylation blocks, each at the cut it would have made
+    /// and with why it is blocked.
+    pub fn blocked_sites(&mut self) -> &[(SiteMark, String)] {
+        self.refresh_sites();
+        &self.sites_cache.as_ref().unwrap().5
+    }
+
+    /// Why the site of `name` at `pos` is blocked, when it is, from the sites last computed.
+    pub fn blocked_reason(&self, name: &str, pos: usize) -> Option<&str> {
+        self.sites_cache.as_ref()?.5.iter().find(|(m, _)| m.name == name && m.pos == pos).map(|(_, why)| why.as_str())
+    }
+
+    /// Recompute the sites when the document, the enzyme set or the unique-only choice changed.
+    fn refresh_sites(&mut self) {
+        let fresh =
+            matches!(&self.sites_cache, Some((rev, set, unique, ..)) if *rev == self.revision && *set == self.enzyme_set && *unique == self.unique_only);
+        if fresh {
+            return;
+        }
+        let db = EnzymeDb::builtin();
+        let enzymes = db.set(&self.enzyme_set).unwrap_or_default();
+        // Sites are found with the document's methylation, so a site Dam or Dcm blocks has no
+        // cuts and is kept apart, with the cut it would have made.
+        let found = find_sites_in(&self.doc, &enzymes);
+        let groups = slopgene_core::enzymes::cutting_sites_by_enzyme(&found);
+        let mut blocked_by_enzyme: std::collections::HashMap<&str, Vec<(usize, String)>> = std::collections::HashMap::new();
+        for site in found.iter().filter(|s| s.blocked.is_some()) {
+            if let (Some(cut), Some(block)) = (site.blocked_cuts.first(), site.blocked) {
+                blocked_by_enzyme.entry(site.enzyme.as_str()).or_default().push((cut.pos, block.describe()));
+            }
+        }
+        let mut counts = Vec::new();
+        let mut marks = Vec::new();
+        let mut blocked_marks = Vec::new();
+        for e in &enzymes {
+            let cuts: Vec<usize> = groups.get(e.name.as_str()).map(|g| g.iter().map(|s| s.cuts[0].pos).collect()).unwrap_or_default();
+            let blocked = blocked_by_enzyme.remove(e.name.as_str()).unwrap_or_default();
+            if cuts.is_empty() && blocked.is_empty() {
+                continue;
+            }
+            if !self.unique_only || cuts.len() == 1 {
+                for &c in &cuts {
+                    marks.push(SiteMark { name: e.name.clone(), pos: c });
+                }
+                for (pos, why) in &blocked {
+                    blocked_marks.push((SiteMark { name: e.name.clone(), pos: *pos }, why.clone()));
+                }
+            }
+            counts.push(EnzymeCount { name: e.name.clone(), site: e.site_with_cuts(), cuts, blocked: blocked.iter().map(|(pos, _)| *pos).collect() });
+        }
+        marks.sort_by_key(|m| m.pos);
+        // Fewest cuts first; an enzyme with only blocked sites comes last.
+        let order = |c: &EnzymeCount| if c.cuts.is_empty() { usize::MAX } else { c.cuts.len() };
+        counts.sort_by(|a, b| order(a).cmp(&order(b)).then_with(|| a.name.cmp(&b.name)));
+        self.sites_cache = Some((self.revision, self.enzyme_set.clone(), self.unique_only, marks, counts, blocked_marks));
     }
 
     /// Select a feature: its extent becomes the selection and the views scroll to it.

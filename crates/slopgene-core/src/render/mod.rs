@@ -15,7 +15,7 @@ pub mod theme;
 pub use scene::*;
 pub use theme::Theme;
 
-use crate::enzymes::{EnzymeDb, find_sites};
+use crate::enzymes::{EnzymeDb, find_sites_in};
 use crate::model::{Document, Feature};
 use crate::span::Span;
 
@@ -152,6 +152,8 @@ pub struct MapOptions {
     /// They are drawn whether or not `enzymes` lists them, and their labels stay when space runs
     /// out.
     pub chosen_enzymes: Vec<SiteMark>,
+    /// Enzyme marks for sites that methylation blocks, drawn faint at the cut each would make.
+    pub blocked_enzymes: Vec<SiteMark>,
     pub selection: Option<Span>,
     pub cursor: Option<usize>,
     /// Feature to outline (by uid).
@@ -183,6 +185,7 @@ impl Default for MapOptions {
             show_ticks: true,
             enzymes: Vec::new(),
             chosen_enzymes: Vec::new(),
+            blocked_enzymes: Vec::new(),
             selection: None,
             cursor: None,
             highlight: None,
@@ -198,7 +201,7 @@ impl Default for MapOptions {
 
 /// Unique cutters among `names` (or the common set when empty), as site marks for a map.
 pub fn unique_cutter_marks(doc: &Document, enzymes: &[&crate::enzymes::Enzyme]) -> Vec<SiteMark> {
-    let sites = find_sites(&doc.seq, doc.is_circular(), enzymes);
+    let sites = find_sites_in(doc, enzymes);
     let groups = crate::enzymes::cutting_sites_by_enzyme(&sites);
     let mut marks = Vec::new();
     for enzyme in enzymes {
@@ -211,6 +214,15 @@ pub fn unique_cutter_marks(doc: &Document, enzymes: &[&crate::enzymes::Enzyme]) 
     marks
 }
 
+/// Marks for the sites of `enzymes` that methylation blocks, at the cut each would have made.
+pub fn blocked_marks(doc: &Document, enzymes: &[&crate::enzymes::Enzyme]) -> Vec<SiteMark> {
+    find_sites_in(doc, enzymes)
+        .iter()
+        .filter(|s| s.blocked.is_some())
+        .filter_map(|s| s.blocked_cuts.first().map(|c| SiteMark { name: s.enzyme.clone(), pos: c.pos }))
+        .collect()
+}
+
 /// Site marks for the default map: unique cutters from the common enzyme set.
 pub fn default_site_marks(doc: &Document) -> Vec<SiteMark> {
     let db = EnzymeDb::builtin();
@@ -220,14 +232,27 @@ pub fn default_site_marks(doc: &Document) -> Vec<SiteMark> {
 
 /// Every enzyme mark a map draws, each with whether it is chosen: the marks of `enzymes`, then
 /// the chosen marks that `enzymes` does not list.
-pub(crate) fn all_marks(options: &MapOptions) -> Vec<(SiteMark, bool)> {
-    let mut marks: Vec<(SiteMark, bool)> = options.enzymes.iter().map(|m| (m.clone(), options.chosen_enzymes.contains(m))).collect();
+pub(crate) fn all_marks(options: &MapOptions) -> Vec<(SiteMark, MarkStyle)> {
+    let style = |m: &SiteMark| if options.chosen_enzymes.contains(m) { MarkStyle::Chosen } else { MarkStyle::Plain };
+    let mut marks: Vec<(SiteMark, MarkStyle)> = options.enzymes.iter().map(|m| (m.clone(), style(m))).collect();
     for mark in &options.chosen_enzymes {
         if !options.enzymes.contains(mark) {
-            marks.push((mark.clone(), true));
+            marks.push((mark.clone(), MarkStyle::Chosen));
         }
     }
+    marks.extend(options.blocked_enzymes.iter().map(|m| (m.clone(), MarkStyle::Blocked)));
     marks
+}
+
+/// How a map draws an enzyme mark.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum MarkStyle {
+    /// A cut.
+    Plain,
+    /// A cut a protocol chose: the accent colour, bold, and its label outranks the rest.
+    Chosen,
+    /// A site that methylation blocks: faint, at the position the cut would have.
+    Blocked,
 }
 
 /// Draw a map of the document: circular for circular molecules, linear otherwise.

@@ -72,6 +72,7 @@ pub enum Action {
     ReverseComplement,
     SetOriginAtCursor,
     ToggleTopology,
+    Methylation,
     AddFeatureFromSelection,
     DeleteSelectedFeature,
     PrimerFromSelection,
@@ -115,6 +116,7 @@ impl Action {
         Action::ReverseComplement,
         Action::SetOriginAtCursor,
         Action::ToggleTopology,
+        Action::Methylation,
         Action::ViewMap,
         Action::ViewSequence,
         Action::ViewSplit,
@@ -189,6 +191,7 @@ impl Action {
             Action::ReverseComplement => "Reverse-complement the whole sequence",
             Action::SetOriginAtCursor => "Set origin at cursor",
             Action::ToggleTopology => "Toggle circular / linear",
+            Action::Methylation => "Methylation…",
             Action::AddFeatureFromSelection => "Add feature from selection…",
             Action::DeleteSelectedFeature => "Delete selected feature",
             Action::PrimerFromSelection => "Save selection as primer",
@@ -397,6 +400,13 @@ struct FeatureDialog {
     strand: Strand,
 }
 
+/// The methylation state being chosen for the document.
+struct MethylationDialog {
+    dam: bool,
+    dcm: bool,
+    ecoki: bool,
+}
+
 /// The fragments of a digest (length, description, fragment), or why it failed.
 type DigestOutcome = std::result::Result<Vec<(usize, String, Document)>, String>;
 
@@ -442,6 +452,7 @@ pub struct SlopGeneApp {
     goto: Option<String>,
     new_sequence: Option<NewSequenceDialog>,
     feature_dialog: Option<FeatureDialog>,
+    methylation_dialog: Option<MethylationDialog>,
     digest_dialog: Option<DigestDialog>,
     console: Console,
     /// What waits for "save changes?" before it closes.
@@ -506,6 +517,7 @@ impl SlopGeneApp {
             goto: None,
             new_sequence: None,
             feature_dialog: None,
+            methylation_dialog: None,
             digest_dialog: None,
             console: Console {
                 code: "// DOC is the open document. Changes apply when the script finishes.\nprint(`${DOC.name}: ${DOC.length} bp, ${DOC.features.len()} features`);\n".into(),
@@ -599,7 +611,12 @@ impl SlopGeneApp {
     /// Whether a dialog that blocks the window (the palette, Go to, New sequence, Add feature,
     /// or the question before closing) is open.
     fn modal_open(&self) -> bool {
-        self.palette.open || self.goto.is_some() || self.new_sequence.is_some() || self.feature_dialog.is_some() || self.confirm_close.is_some()
+        self.palette.open
+            || self.goto.is_some()
+            || self.new_sequence.is_some()
+            || self.feature_dialog.is_some()
+            || self.methylation_dialog.is_some()
+            || self.confirm_close.is_some()
     }
 
     /// Paste clipboard text into the open document at the cursor, replacing the selection.
@@ -862,6 +879,13 @@ impl SlopGeneApp {
                         edit::set_topology(d, next);
                         Ok(())
                     });
+                }
+            }
+            Action::Methylation => {
+                let current = self.tab().filter(|t| t.doc.molecule == Molecule::Dna).map(|t| t.doc.methylation);
+                match current {
+                    Some(m) => self.methylation_dialog = Some(MethylationDialog { dam: m.dam, dcm: m.dcm, ecoki: m.ecoki }),
+                    None => self.note("open a DNA file first"),
                 }
             }
             Action::AddFeatureFromSelection => {
@@ -1808,7 +1832,9 @@ impl SlopGeneApp {
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             let state = if tab.dirty { "unsaved" } else { "saved" };
                             let unit = if tab.doc.molecule == Molecule::Protein { "aa" } else { "bp" };
-                            ui.label(small(format!("{} {unit}  ·  {}  ·  {state}", thousands(len), tab.doc.topology.name())));
+                            let methylation =
+                                if tab.doc.molecule == Molecule::Dna { format!("  ·  {}", tab.doc.methylation.describe()) } else { String::new() };
+                            ui.label(small(format!("{} {unit}  ·  {}{methylation}  ·  {state}", thousands(len), tab.doc.topology.name())));
                             // The path gets the room that is left, shortened from the front so the
                             // file name stays visible in a narrow window.
                             let place = tab.path.as_ref().map(|p| p.display().to_string()).unwrap_or_else(|| "not saved yet".into());
@@ -2116,6 +2142,8 @@ impl SlopGeneApp {
                     Ok(bases) if !bases.is_empty() => {
                         let topology = if dialog.circular { Topology::Circular } else { Topology::Linear };
                         let mut doc = Document::new_dna(dialog.name.trim(), bases.to_ascii_uppercase(), topology);
+                        // Methylated as DNA from E. coli is, which is what SnapGene assumes too.
+                        doc.methylation = Methylation::E_COLI;
                         doc.meta.synthetic = Some(true);
                         doc.meta.created = Some(clock::today_iso());
                         let mut tab = DocTab::new(doc, None);
@@ -2183,6 +2211,45 @@ impl SlopGeneApp {
                 }
             } else if cancel || modal.should_close() {
                 self.feature_dialog = None;
+            }
+        }
+
+        // The DNA's methylation, which decides the sites that Dam, Dcm and EcoKI block.
+        if let Some(dialog) = self.methylation_dialog.as_mut() {
+            let mut apply = false;
+            let mut cancel = false;
+            let modal = egui::Modal::new(egui::Id::unique("methylation")).show(ctx, |ui| {
+                ui.set_width(380.0);
+                ui.heading("Methylation");
+                let words = "Plasmid DNA from the usual E. coli strains (DH5α, TOP10, JM109) is Dam+ Dcm+ EcoKI+. \
+                             DNA from a dam- dcm- strain such as JM110 or SCS110, a PCR product or a synthetic fragment is not methylated. \
+                             A site that methylation blocks is not cut, and the map draws it faint.";
+                ui.label(RichText::new(words).size(11.5).color(palette.muted));
+                ui.add_space(4.0);
+                ui.checkbox(&mut dialog.dam, "Dam, which methylates GATC");
+                ui.checkbox(&mut dialog.dcm, "Dcm, which methylates CCWGG");
+                ui.checkbox(&mut dialog.ecoki, "EcoKI, which methylates AAC(N6)GTGC");
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    if ui.button("Apply").clicked() {
+                        apply = true;
+                    }
+                    if ui.button("Cancel").clicked() {
+                        cancel = true;
+                    }
+                });
+            });
+            if apply {
+                let methylation = Methylation { dam: dialog.dam, dcm: dialog.dcm, ecoki: dialog.ecoki };
+                self.methylation_dialog = None;
+                if let Some(tab) = self.tabs.get_mut(self.active) {
+                    let _ = tab.edit(|d| {
+                        d.methylation = methylation;
+                        Ok(())
+                    });
+                }
+            } else if cancel || modal.should_close() {
+                self.methylation_dialog = None;
             }
         }
 

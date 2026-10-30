@@ -45,7 +45,7 @@ SlopGene is two programs that share one Rust library, so a digest, a PCR or a ma
 |---|---|
 | Files | `.dna`, `.rna` and `.prot` (byte-for-byte round trips, the default for saving), GenBank, FASTA, JSON |
 | Viewing and editing | circular and linear maps, both strands with translations and enzyme cuts, insert, delete, replace, invert, reverse-complement, set origin, topology, features, primers, undo |
-| Enzymes | 581 commercial enzymes from REBASE, named sets, unique cutters, digests with exact sticky ends and virtual gels |
+| Enzymes | 581 commercial enzymes from REBASE, named sets, unique cutters, the sites that Dam, Dcm or EcoKI methylation blocks, digests with exact sticky ends and virtual gels |
 | Primers | melting temperatures, pairing scores and design by Primer3's method, binding sites with mismatches |
 | Cloning | PCR, restriction cloning, Gibson, NEBuilder HiFi and In-Fusion assembly, Golden Gate, and the enzymes that cut nearest a marked part |
 | Protocols | constructions built step by step on a bench of small plasmids that zoom into full maps with the bases under them, with every junction checked |

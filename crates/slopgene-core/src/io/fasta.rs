@@ -37,6 +37,9 @@ pub fn read(text: &str) -> Result<Vec<Document>> {
         if looks_like_protein(&doc.seq) {
             doc.molecule = Molecule::Protein;
             doc.strandedness = Strandedness::Single;
+        } else {
+            // DNA is taken to come from a dam+ dcm+ strain of E. coli, as SnapGene assumes.
+            doc.methylation = Methylation::E_COLI;
         }
     }
     Ok(docs)

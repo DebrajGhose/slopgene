@@ -34,7 +34,7 @@ use crate::style::{self, Palette};
 use eframe::egui::{
     self, Align2, Color32, CornerRadius, CursorIcon, DragAndDrop, Key, LayerId, Order, Pos2, Rect, RichText, Sense, Stroke, UiBuilder, pos2, vec2,
 };
-use slopgene_core::enzymes::{EnzymeDb, cut_counts};
+use slopgene_core::enzymes::{EnzymeDb, cut_counts, cut_counts_in};
 use slopgene_core::excise::{self, NearCut, NearestCuts};
 use slopgene_core::gel::{GelOptions, Ladder, Lane, render_gel};
 use slopgene_core::protocol::{
@@ -397,7 +397,7 @@ impl ProtocolTab {
             let bases = region.extract(&template.doc.seq);
             let inside = cut_counts(&bases, false, &enzymes);
             let vector = other_plasmid(&self.protocol, &self.run, step);
-            let in_vector = vector.as_ref().map(|v| cut_counts(&v.seq, v.is_circular(), &enzymes));
+            let in_vector = vector.as_ref().map(|v| cut_counts_in(v, &enzymes));
             let mut found: Vec<TailChoice> = inside
                 .iter()
                 .enumerate()

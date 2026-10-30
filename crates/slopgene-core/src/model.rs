@@ -445,6 +445,49 @@ pub struct Methylation {
     pub ecoki: bool,
 }
 
+impl Methylation {
+    /// DNA from the usual cloning strains of E. coli (DH5α, TOP10, JM109 and the like), which
+    /// methylate GATC (Dam), CCWGG (Dcm) and the EcoKI site. SnapGene gives new files this state.
+    pub const E_COLI: Methylation = Methylation { dam: true, dcm: true, ecoki: true };
+    /// DNA with no methylation: a PCR product or a synthetic fragment.
+    pub const NONE: Methylation = Methylation { dam: false, dcm: false, ecoki: false };
+
+    /// Whether any methylase has acted on the DNA.
+    pub fn any(self) -> bool {
+        self.dam || self.dcm || self.ecoki
+    }
+
+    /// The state in words: `Dam+ Dcm+ EcoKI+`, `Dam- Dcm- EcoKI+`, or `unmethylated`.
+    pub fn describe(self) -> String {
+        if !self.any() {
+            return "unmethylated".to_string();
+        }
+        let sign = |on: bool| if on { '+' } else { '-' };
+        format!("Dam{} Dcm{} EcoKI{}", sign(self.dam), sign(self.dcm), sign(self.ecoki))
+    }
+
+    /// The state after a change written as words: `dam+`, `dam-`, `dcm+`, `dcm-`, `ecoki+` and
+    /// `ecoki-` in any order, separated by spaces or commas, or `none` (nothing methylated) and
+    /// `ecoli` (the usual strains). A methylase the words do not name keeps its state.
+    pub fn changed(self, spec: &str) -> std::result::Result<Methylation, String> {
+        let mut out = self;
+        for word in spec.split([' ', ',', ';']).filter(|w| !w.is_empty()) {
+            match word.to_ascii_lowercase().as_str() {
+                "none" | "unmethylated" => out = Methylation::NONE,
+                "ecoli" | "e.coli" | "all" | "default" => out = Methylation::E_COLI,
+                "dam+" => out.dam = true,
+                "dam-" => out.dam = false,
+                "dcm+" => out.dcm = true,
+                "dcm-" => out.dcm = false,
+                "ecoki+" => out.ecoki = true,
+                "ecoki-" => out.ecoki = false,
+                other => return Err(format!("'{other}' is not a methylation state; use dam+, dam-, dcm+, dcm-, ecoki+, ecoki-, none or ecoli")),
+            }
+        }
+        Ok(out)
+    }
+}
+
 /// A literature reference attached to a sequence.
 #[derive(Clone, Debug, PartialEq, Default)]
 pub struct Reference {

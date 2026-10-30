@@ -14,6 +14,7 @@ This guide covers building and testing, the rules the code follows, and how a re
 | Lints, as CI runs them | `cargo clippy --workspace --all-targets -- -D warnings` |
 | Windows installer, locally | `cargo build --release -p slopgene-gui -p slopgene-cli`, then `cargo packager --release -p slopgene-gui --formats nsis` (cargo-packager 0.11.8) |
 | App icon files, after editing `assets/icon/slopgene.svg` | `cargo run -p slopgene-gui --example make_icons` |
+| Methylation columns of the enzyme table, from REBASE | `py scripts/rebase-methylation.py crates/slopgene-core/data/enzymes.tsv --cache /tmp/rebase` |
 
 The minimum Rust version is 1.95, which egui 0.37 sets.
 The README's [Building from source](README.md#building-from-source) section lists what each system needs besides Rust.

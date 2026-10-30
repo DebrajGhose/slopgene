@@ -58,6 +58,12 @@ Enzyme arguments take names (`EcoRI,BamHI`) or a set name.
 The sets are `common`, `6+`, `8+`, `neb`, `thermo`, `golden-gate`, `type-iis`, `blunt` and `all`.
 Site positions are top-strand cut positions, as SnapGene labels them.
 The enzyme data comes from REBASE.
+
+Methylation counts.
+A plasmid grown in the usual E. coli strains is methylated by Dam (GATC), Dcm (CCWGG) and EcoKI, and an enzyme whose site holds a methylated base may not cut there: XbaI, ClaI and BclI are blocked by Dam where a GATC overlaps their site, StuI by Dcm, and DpnI cuts only Dam-methylated GATC.
+SlopGene reads each file's methylation state (`.dna` files store it, and imported GenBank and FASTA DNA is taken to be Dam+ Dcm+ EcoKI+, as a new file is), leaves the blocked sites out of `sites`, `digest`, `excise`, cloning and protocols, and lists them under `blocked` with the reason.
+A PCR product is unmethylated, so a site that methylation blocks on the template cuts on the product.
+`slopgene edit plasmid.dna methylation "dam- dcm-"` changes the state (`none` clears it and `ecoli` sets all three), `info` and `show` print it, and `enzymes info` gives each enzyme's response to Dam, Dcm, CpG, EcoBI and EcoKI as REBASE records it.
 To use a newer REBASE release, run `slopgene enzymes import-rebase` and point the environment variable `SLOPGENE_ENZYMES` at the result.
 
 ## Primers and PCR
@@ -284,6 +290,8 @@ Positions count from 1.
 | `digest.no_cut` | the enzymes do not cut the molecule (the fixes name enzymes that cut it once) |
 | `digest.cuts_part` | a warning: an enzyme cuts inside the digest's part |
 | `digest.no_part` | a warning: the digest's part names no feature or range of the molecule |
+| `digest.blocked` | a warning: methylation blocks a site, so it is not cut (the fix suggests a PCR copy, which is unmethylated) |
+| `digest.impaired` | a warning: methylation impairs a site's cut, or may block it |
 | `pick.no_match` | no fragment meets the criteria |
 | `pick.stale` | the pinned fragment no longer meets the criteria |
 | `input.unknown` | an input names no step, or a step further down |
@@ -395,6 +403,7 @@ slopgene edit construct.dna update-feature "His tag" --color "#515faa"
 slopgene edit construct.dna add-primer --name seqF --seq GTAAAACGACGGCCAGT
 slopgene edit construct.dna origin --at 1500
 slopgene edit construct.dna topology linear
+slopgene edit construct.dna methylation "dam- dcm-"
 ```
 
 A replacement of the same length is a point mutation, and nothing moves.

@@ -6,7 +6,7 @@
 //! same when read on the top strand, which is what complementary single strands look like there.
 
 use crate::edit;
-use crate::enzymes::{Cut, Enzyme, Site, find_sites};
+use crate::enzymes::{Cut, Enzyme, Site, find_sites_in};
 use crate::error::{Result, invalid};
 use crate::model::*;
 use crate::span::Span;
@@ -42,6 +42,8 @@ pub struct Digest {
     pub sites: Vec<Site>,
     /// Enzymes that did not cut at all.
     pub non_cutters: Vec<String>,
+    /// Sites that methylation kept the enzymes from cutting (see [`Site::blocked`]).
+    pub blocked: Vec<Site>,
 }
 
 /// Cut `doc` with `enzymes`. A circular molecule with no cuts comes back as one uncut circular
@@ -53,7 +55,10 @@ pub fn digest(doc: &Document, enzymes: &[&Enzyme]) -> Result<Digest> {
     }
     let seq_len = doc.len();
     let circular = doc.is_circular();
-    let sites: Vec<Site> = find_sites(&doc.seq, circular, enzymes).into_iter().filter(|s| !s.cuts.is_empty()).collect();
+    // Sites are found with the molecule's methylation, so a site Dam or Dcm blocks has no cuts.
+    let found = find_sites_in(doc, enzymes);
+    let blocked: Vec<Site> = found.iter().filter(|s| s.blocked.is_some()).cloned().collect();
+    let sites: Vec<Site> = found.into_iter().filter(|s| !s.cuts.is_empty()).collect();
     let cutters: std::collections::HashSet<&str> = sites.iter().map(|s| s.enzyme.as_str()).collect();
     let non_cutters = enzymes.iter().filter(|e| !cutters.contains(e.name.as_str())).map(|e| e.name.clone()).collect();
 
@@ -74,7 +79,7 @@ pub fn digest(doc: &Document, enzymes: &[&Enzyme]) -> Result<Digest> {
         let mut whole = doc.clone();
         whole.raw = RawData::default();
         fragments.push(Fragment { doc: whole, span: Span::new(0, seq_len), left_enzyme: None, right_enzyme: None });
-        return Ok(Digest { fragments, sites, non_cutters });
+        return Ok(Digest { fragments, sites, non_cutters, blocked });
     }
 
     // Unwrapped boundaries of a fragment: its left end starts where the earlier strand of the
@@ -147,7 +152,7 @@ pub fn digest(doc: &Document, enzymes: &[&Enzyme]) -> Result<Digest> {
         let last = cuts.len() - 1;
         fragments.push(make(Some((cuts[last].0, &cuts[last].1)), None, false)?);
     }
-    Ok(Digest { fragments, sites, non_cutters })
+    Ok(Digest { fragments, sites, non_cutters, blocked })
 }
 
 /// Bases of an end's overhang, as read on the top strand.
@@ -380,5 +385,25 @@ mod tests {
         assert_eq!(result.fragments[1].len(), 19);
         let back = ligate(&result.fragments[0].doc, &result.fragments[1].doc).unwrap();
         assert_eq!(back.seq, doc.seq);
+    }
+
+    #[test]
+    fn a_digest_leaves_blocked_sites_uncut_and_lists_them() {
+        let xbai = crate::enzymes::EnzymeDb::builtin().get("XbaI").unwrap();
+        // Two XbaI sites on a circle; the second overlaps GATC, which Dam methylates.
+        let mut seq = vec![b'A'; 100];
+        seq[10..16].copy_from_slice(b"TCTAGA");
+        seq[60..68].copy_from_slice(b"TCTAGATC");
+        let mut doc = Document::new_dna("p", seq, Topology::Circular);
+        doc.methylation = Methylation::E_COLI;
+        let cut = digest(&doc, &[xbai]).unwrap();
+        assert_eq!(cut.fragments.len(), 1, "one cut opens the circle");
+        assert_eq!(cut.blocked.len(), 1);
+        assert_eq!(cut.blocked[0].start, 60);
+        assert_eq!(cut.fragments[0].doc.methylation, Methylation::E_COLI, "a fragment keeps the methylation");
+        doc.methylation = Methylation::NONE;
+        let cut = digest(&doc, &[xbai]).unwrap();
+        assert_eq!(cut.fragments.len(), 2);
+        assert!(cut.blocked.is_empty());
     }
 }

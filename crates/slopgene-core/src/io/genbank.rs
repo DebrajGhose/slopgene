@@ -238,6 +238,11 @@ fn read_record(lines: &[&str]) -> Result<Document> {
         feature.normalize(seq_len, circular);
         doc.features.push(feature);
     }
+    // Plasmid DNA is taken to come from a dam+ dcm+ strain of E. coli, as SnapGene assumes of an
+    // imported file. GenBank has no field for it.
+    if doc.molecule == crate::model::Molecule::Dna {
+        doc.methylation = crate::model::Methylation::E_COLI;
+    }
     Ok(doc)
 }
 

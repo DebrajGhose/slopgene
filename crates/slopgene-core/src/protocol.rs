@@ -44,7 +44,7 @@
 use crate::alphabet::{self, same_circle};
 use crate::digest::{circularize, digest, ends_compatible, ligate, overhang_bases};
 use crate::edit;
-use crate::enzymes::{EnzymeDb, cut_counts, find_sites};
+use crate::enzymes::{EnzymeDb, blocked_groups, cut_counts_in, find_sites, find_sites_in};
 use crate::error::{Error, Result};
 use crate::json;
 use crate::model::*;
@@ -2184,9 +2184,20 @@ fn run_digest(input: &Piece, params: &DigestParams, db: &EnzymeDb, result: &mut 
     if cut.sites.is_empty() {
         // Suggest enzymes of the common set that cut this molecule once.
         let common = db.set("common").unwrap_or_default();
-        let once: Vec<String> =
-            cut_counts(&input.doc.seq, circular, &common).into_iter().filter(|(_, n)| *n == 1).take(8).map(|(e, _)| e.name.clone()).collect();
-        let mut issue = Issue::new("digest.no_cut", format!("{names} do not cut {}", input.doc.name));
+        let once: Vec<String> = cut_counts_in(&input.doc, &common).into_iter().filter(|(_, n)| *n == 1).take(8).map(|(e, _)| e.name.clone()).collect();
+        let mut issue = if cut.blocked.is_empty() {
+            Issue::new("digest.no_cut", format!("{names} do not cut {}", input.doc.name))
+        } else {
+            // Every site is blocked by methylation, which is worth saying, as a PCR copy cuts.
+            let mut blocks: Vec<String> = Vec::new();
+            for site in cut.blocked.iter().filter_map(|s| s.blocked.map(|b| format!("{} is {}", s.enzyme, b.describe()))) {
+                if !blocks.contains(&site) {
+                    blocks.push(site);
+                }
+            }
+            Issue::new("digest.no_cut", format!("{names} do not cut {}: {}", input.doc.name, blocks.join(", ")))
+                .fix("copy the part out by PCR, which gives unmethylated DNA, or grow the plasmid in a dam- dcm- strain")
+        };
         if !once.is_empty() {
             issue = issue.fix(format!("enzymes that cut it once: {}", once.join(", ")));
         }
@@ -2194,6 +2205,21 @@ fn run_digest(input: &Piece, params: &DigestParams, db: &EnzymeDb, result: &mut 
     }
     for name in &cut.non_cutters {
         result.warnings.push(Issue::new("digest.non_cutter", format!("{name} does not cut {}", input.doc.name)));
+    }
+    // Sites that methylation keeps the enzymes from cutting, and sites it impairs. A PCR copy of
+    // the part is unmethylated, so the fix names it.
+    for group in blocked_groups(&cut.blocked) {
+        let at: Vec<String> = group.positions.iter().map(|p| thousands(*p)).collect();
+        let (sites, verb, them) = if at.len() == 1 { ("site", "is", "it is") } else { ("sites", "are", "they are") };
+        result.warnings.push(
+            Issue::new("digest.blocked", format!("the {} {sites} at {} {verb} {}, so {them} not cut", group.enzyme, at.join(", "), group.reason))
+                .fix("copy the part out by PCR, which gives unmethylated DNA, or grow the plasmid in a dam- dcm- strain"),
+        );
+    }
+    for site in cut.sites.iter().filter(|s| s.impaired.is_some()) {
+        let at = site.cuts.first().map_or(site.start + 1, |c| c.pos.max(1));
+        let what = site.impaired.map(|b| b.describe()).unwrap_or_default();
+        result.warnings.push(Issue::new("digest.impaired", format!("the {} site at {} is {}", site.enzyme, thousands(at), what)));
     }
     result.findings.cuts = cut.sites.iter().flat_map(|s| s.cuts.iter().map(move |c| (s.enzyme.clone(), c.pos))).collect();
     result.findings.non_cutters = cut.non_cutters.clone();
@@ -2503,7 +2529,7 @@ fn regenerated_sites(product: &Document, position: usize, overhang: usize, enzym
     let mut found = Vec::new();
     for name in enzymes {
         let Some(enzyme) = db.get(name) else { continue };
-        let sites = find_sites(&product.seq, product.is_circular(), &[enzyme]);
+        let sites = find_sites_in(product, &[enzyme]);
         // A site the join made must reach across it. The double-stranded overhang exists only
         // once the two ends anneal, so a site on any overhang base counts. A blunt join has no
         // shared bases, so the site must hold the bases on both sides of it.
@@ -2572,7 +2598,9 @@ fn join(pieces: &[Piece], labels: &[String], flips: &[bool], circular: bool, nam
         if let Some(issue) = junction_problem(&product, &product, &labels[last], &labels[0]) {
             return Err(issue);
         }
-        let doc = circularize(&product.doc).map_err(|e| Issue::new("ends.incompatible", e.to_string()))?;
+        let mut doc = circularize(&product.doc).map_err(|e| Issue::new("ends.incompatible", e.to_string()))?;
+        // The circle is a plasmid to transform, so it comes back methylated as E. coli leaves it.
+        doc.methylation = Methylation::E_COLI;
         joins.push((last, 0, 0));
         product = Piece::plain(doc);
     }

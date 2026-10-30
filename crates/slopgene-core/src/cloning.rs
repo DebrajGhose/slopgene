@@ -7,7 +7,7 @@
 use crate::alphabet;
 use crate::digest::{circularize, digest, ends_compatible, ligate, merge_split_features};
 use crate::edit;
-use crate::enzymes::{Enzyme, find_sites};
+use crate::enzymes::{Enzyme, find_sites_in};
 use crate::error::{Error, Result};
 use crate::model::*;
 use crate::primers::{TmConditions, melting_temperature};
@@ -59,6 +59,8 @@ pub fn restriction_clone(vector: &Document, insert: &Document, enzymes: &[&Enzym
             }
             let joined = ligate(&backbone.doc, &piece)?;
             let mut circle = circularize(&joined)?;
+            // The product is a plasmid to transform, so it is methylated as E. coli leaves it.
+            circle.methylation = Methylation::E_COLI;
             circle.name = format!("{} + {}", vector.name, insert.name);
             circle.meta.description =
                 format!("{} cloned into {} with {}", insert.name, vector.name, enzymes.iter().map(|e| e.name.as_str()).collect::<Vec<_>>().join(" + "));
@@ -168,6 +170,7 @@ pub fn homology_assembly(fragments: &[Document], min_overlap: usize, circular: b
         let new_len = product.len() - k;
         product.seq.truncate(new_len);
         product.topology = Topology::Circular;
+        product.methylation = Methylation::E_COLI;
         // Features that ran into the duplicated overlap now wrap through the origin.
         for f in &mut product.features {
             for s in &mut f.segments {
@@ -203,7 +206,7 @@ pub fn golden_gate(parts: &[Document], enzyme: &Enzyme) -> Result<Product> {
             .fragments
             .into_iter()
             .filter(|f| f.left_enzyme.is_some() && f.right_enzyme.is_some() && !f.doc.is_circular())
-            .filter(|f| find_sites(&f.doc.seq, false, &[enzyme]).is_empty())
+            .filter(|f| find_sites_in(&f.doc, &[enzyme]).is_empty())
             .map(|f| f.doc)
             .collect();
         if pieces.is_empty() {
@@ -266,6 +269,7 @@ pub fn golden_gate(parts: &[Document], enzyme: &Enzyme) -> Result<Product> {
                 joined = ligate(&joined, piece)?;
             }
             let mut circle = circularize(&joined)?;
+            circle.methylation = Methylation::E_COLI;
             circle.name = parts.iter().map(|p| p.name.as_str()).collect::<Vec<_>>().join(" + ");
             circle.meta.synthetic = Some(true);
             circle.meta.description = format!("Golden Gate assembly with {} of {}", enzyme.name, circle.name);
@@ -285,6 +289,7 @@ pub fn revcomp_text(text: &str) -> String {
 mod tests {
     use super::*;
     use crate::enzymes::EnzymeDb;
+    use crate::enzymes::find_sites;
 
     fn random_dna(n: usize, seed: u64) -> Vec<u8> {
         // A small linear congruential generator keeps tests deterministic.

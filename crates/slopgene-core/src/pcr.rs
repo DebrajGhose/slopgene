@@ -110,6 +110,9 @@ pub fn pcr(template: &Document, forward: &Primer, reverse: &Primer, rules: &Bind
     // Features from the template region, shifted past the forward primer's 5' tail.
     let mut product =
         Document::new_dna(format!("{} PCR {}-{}", template.name, top_primer.name, bottom_primer.name).trim().to_string(), product_seq, Topology::Linear);
+    // A polymerase makes unmethylated DNA, so a site that methylation blocks on the template is
+    // cut on the product.
+    product.methylation = Methylation::NONE;
     if let Ok(region) = edit::extract(template, span) {
         for mut feature in region.features {
             for s in &mut feature.segments {

@@ -266,26 +266,39 @@ fn enzymes_section(ui: &mut egui::Ui, tab: &mut DocTab, palette: &Palette) {
         ui.checkbox(&mut tab.unique_only, "unique only");
     });
     let unique_only = tab.unique_only;
-    let counts: Vec<(String, String, Vec<usize>)> = tab.sites().1.iter().map(|c| (c.name.clone(), c.site.clone(), c.cuts.clone())).collect();
+    let counts: Vec<(String, String, Vec<usize>, Vec<usize>)> =
+        tab.sites().1.iter().map(|c| (c.name.clone(), c.site.clone(), c.cuts.clone(), c.blocked.clone())).collect();
+    let methylation = tab.doc.methylation.describe();
     let mut jump = None;
-    let shown: Vec<&(String, String, Vec<usize>)> = counts.iter().filter(|c| !unique_only || c.2.len() == 1).collect();
+    let shown: Vec<&(String, String, Vec<usize>, Vec<usize>)> = counts.iter().filter(|c| !unique_only || c.2.len() == 1).collect();
     if shown.is_empty() {
         ui.label(RichText::new("No cuts with this set.").small().color(palette.faint));
     }
-    for (name, site, cuts) in shown.iter().take(150) {
+    for (name, site, cuts, blocked) in shown.iter().take(150) {
         let response = ui
             .horizontal(|ui| {
                 let label = ui.add(egui::Label::new(RichText::new(name)).sense(Sense::click()));
                 ui.label(RichText::new(site).small().font(style::mono_font(10.5)).color(palette.faint));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let text = if cuts.len() == 1 { cuts[0].to_string() } else { format!("{}×", cuts.len()) };
-                    ui.label(RichText::new(text).small().color(palette.muted));
+                    // The cut, or how many cuts, and how many sites methylation blocks.
+                    let mut text = match cuts.len() {
+                        0 => String::new(),
+                        1 => cuts[0].to_string(),
+                        n => format!("{n}×"),
+                    };
+                    if !blocked.is_empty() {
+                        text = format!("{text}  {} blocked", blocked.len()).trim().to_string();
+                    }
+                    let count = ui.label(RichText::new(text).small().color(palette.muted));
+                    if !blocked.is_empty() {
+                        count.on_hover_text(format!("{} site(s) that methylation blocks ({methylation}), so they are not cut", blocked.len()));
+                    }
                 });
                 label
             })
             .inner;
         if response.clicked() {
-            jump = cuts.first().copied();
+            jump = cuts.first().or(blocked.first()).copied();
         }
     }
     if let Some(pos) = jump {

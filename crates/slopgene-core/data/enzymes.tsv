@@ -2,586 +2,591 @@
 # REBASE, the Restriction Enzyme Database, http://rebase.neb.com (Roberts RJ, Vincze T, Posfai J, Macelis D. Nucleic Acids Res.)
 # Cut positions are boundaries counted from the first base of the site (0 = just before it,
 # negative = upstream), on the top strand (top) and bottom strand (bottom), in top-strand coordinates.
-# Regenerate with: slopgene enzymes import-rebase --emboss-e link_emboss_e --emboss-r link_emboss_r
-name	site	top1	bottom1	top2	bottom2	suppliers
-AanI	TTATAA	3	3			B
-AarI	CACCTGC	11	15			B
-AatII	GACGTC	5	1			BINRV
-AbsI	CCTCGAGG	2	6			I
-Acc16I	TGCGCA	3	3			IV
-Acc36I	ACCTGC	10	14			I
-Acc65I	GGTACC	1	5			BINRV
-AccB1I	GGYRCC	1	5			IV
-AccB7I	CCANNNNNTGG	7	4			IRV
-AccBSI	CCGCTC	3	3			IV
-AccI	GTMKAC	2	4			JNQRVX
-AccII	CGCG	2	2			J
-AccIII	TCCGGA	1	5			JR
-AciI	CCGC	1	3			N
-AclI	AACGTT	2	4			INV
-AclWI	GGATC	9	10			I
-AcoI	YGGCCR	1	5			I
-AcsI	RAATTY	1	5			IV
-AcuI	CTGAAG	22	20			IN
-AcvI	CACGTG	3	3			QX
-AcyI	GRCGYC	2	4			JV
-AdeI	CACNNNGTG	6	3			B
-AfeI	AGCGCT	3	3			IN
-AfiI	CCNNNNNNNGG	7	4			V
-AflII	CTTAAG	1	5			JN
-AflIII	ACRYGT	1	5			N
-AgeI	ACCGGT	1	5			JNRSV
-AgsI	TTSAA	3	2			I
-AhdI	GACNNNNNGTC	6	5			NV
-AhlI	ACTAGT	1	5			IV
-AjiI	CACGTC	3	3			B
-AjnI	CCWGG	0	5			I
-AjuI	GAANNNNNNNTTGG	-7	-12	25	20	B
-AleI	CACNNNNGTG	5	5			IN
-AlfI	GCANNNNNNTGC	-10	-12	24	22	B
-AloI	GAACNNNNNNTCC	-7	-12	25	20	B
-AluBI	AGCT	2	2			I
-AluI	AGCT	2	2			BIJNQRVX
-Alw21I	GWGCWC	5	1			BV
-Alw26I	GTCTC	6	10			BV
-Alw44I	GTGCAC	1	5			BJRV
-AlwI	GGATC	9	10			N
-AlwNI	CAGNNNCTG	6	3			N
-Ama87I	CYCGRG	1	5			IV
-Aor13HI	TCCGGA	1	5			V
-AoxI	GGCC	0	4			I
-ApaI	GGGCCC	5	1			BIJNQRVX
-ApaLI	GTGCAC	1	5			NSV
-ApeKI	GCWGC	1	4			N
-ApoI	RAATTY	1	5			NV
-ArsI	GACNNNNNNTTYG	-8	-13	24	19	I
-AscI	GGCGCGCC	2	6			NS
-AseI	ATTAAT	2	4			JNV
-AsiGI	ACCGGT	1	5			IV
-AsiSI	GCGATCGC	5	3			IN
-AspA2I	CCTAGG	1	5			IV
-AspEI	GACNNNNNGTC	6	5			V
-AspLEI	GCGC	3	1			IV
-AspS9I	GGNCC	1	4			IV
-AsuC2I	CCSGG	2	3			I
-AsuHPI	GGTGA	13	12			IV
-AsuII	TTCGAA	2	4			V
-AsuNHI	GCTAGC	1	5			IV
-AvaI	CYCGRG	1	5			JNQRVX
-AvaII	GGWCC	1	4			JNRVX
-AviII	TGCGCA	3	3			V
-AvrII	CCTAGG	1	5			NSVX
-AxyI	CCTNAGG	2	5			J
-BaeGI	GKGCMC	5	1			N
-BaeI	ACNNNNGTAYC	-10	-15	23	18	N
-BalI	TGGCCA	3	3			JQRVX
-BamHI	GGATCC	1	5			BIJNQRSVX
-BanI	GGYRCC	1	5			NRV
-BanII	GRGCYC	5	1			NRVX
-BarI	GAAGNNNNNNTAC	-7	-12	25	20	I
-BauI	CACGAG	1	5			B
-BbrPI	CACGTG	3	3			V
-BbsI	GAAGAC	8	12			NV
-BbuI	GCATGC	5	1			R
-Bbv12I	GWGCWC	5	1			I
-BbvCI	CCTCAGC	2	5			N
-BbvI	GCAGC	13	17			N
-BccI	CCATC	9	10			N
-BceAI	ACGGC	17	19			N
-BcgI	CGANNNNNNTGC	-10	-12	24	22	N
-BciVI	GTATCC	12	11			N
-BclI	TGATCA	1	5			BJNRSV
-BcnI	CCSGG	2	3			B
-BcoDI	GTCTC	6	10			N
-BcuI	ACTAGT	1	5			B
-BfaI	CTAG	1	3			N
-BfmI	CTRYAG	1	5			B
-BfuAI	ACCTGC	10	14			N
-BfuI	GTATCC	12	11			B
-BglI	GCCNNNNNGGC	7	4			BIJNQRX
-BglII	AGATCT	1	5			BIJNQRSX
-BlpI	GCTNAGC	2	5			NV
-BlsI	GCNGC	3	2			I
-BmcAI	AGTACT	3	3			V
-Bme1390I	CCNGG	2	3			B
-Bme18I	GGWCC	1	4			IV
-BmeRI	GACNNNNNGTC	6	5			V
-BmgBI	CACGTC	3	3			N
-BmiI	GGNNCC	3	3			V
-BmrFI	CCNGG	2	3			V
-BmrI	ACTGGG	11	10			N
-BmtI	GCTAGC	5	1			INV
-BmuI	ACTGGG	11	10			I
-BmyI	GDGCHC	5	1			V
-BoxI	GACNNNNGTC	5	5			BV
-BpiI	GAAGAC	8	12			B
-BplI	GAGNNNNNCTC	-8	-13	24	19	B
-BpmI	CTGGAG	22	20			IN
-Bpu10I	CCTNAGC	2	5			BINV
-Bpu1102I	GCTNAGC	2	5			B
-Bpu14I	TTCGAA	2	4			IV
-BpuEI	CTTGAG	22	20			N
-BpuMI	CCSGG	2	3			V
-Bsa29I	ATCGAT	2	4			I
-BsaAI	YACGTR	3	3			NV
-BsaBI	GATNNNNATC	5	5			NV
-BsaHI	GRCGYC	2	4			NV
-BsaI	GGTCTC	7	11			NSV
-BsaJI	CCNNGG	1	5			N
-BsaMI	GAATGC	7	5			RV
-BsaWI	WCCGGW	1	5			N
-BsaXI	ACNNNNNCTCC	-9	-12	21	18	N
-Bsc4I	CCNNNNNNNGG	7	4			IV
-Bse118I	RCCGGY	1	5			IV
-Bse1I	ACTGG	6	4			IV
-Bse21I	CCTNAGG	2	5			I
-Bse3DI	GCAATG	8	6			I
-Bse8I	GATNNNNATC	5	5			IV
-BseBI	CCWGG	2	3			V
-BseDI	CCNNGG	1	5			B
-BseGI	GGATG	7	5			B
-BseJI	GATNNNNATC	5	5			B
-BseLI	CCNNNNNNNGG	7	4			B
-BseMI	GCAATG	8	6			B
-BseMII	CTCAG	15	13			B
-BseNI	ACTGG	6	4			B
-BsePI	GCGCGC	1	5			IV
-BseRI	GAGGAG	16	14			N
-BseSI	GKGCMC	5	1			B
-BseX3I	CGGCCG	1	5			IV
-BseXI	GCAGC	13	17			B
-BseYI	CCCAGC	1	5			N
-BsgI	GTGCAG	22	20			N
-Bsh1236I	CGCG	2	2			B
-Bsh1285I	CGRYCG	4	2			B
-BshNI	GGYRCC	1	5			B
-BshTI	ACCGGT	1	5			B
-BshVI	ATCGAT	2	4			V
-BsiEI	CGRYCG	4	2			NV
-BsiHKAI	GWGCWC	5	1			NV
-BsiHKCI	CYCGRG	1	5			QX
-BsiWI	CGTACG	1	5			N
-BslFI	GGGAC	15	19			I
-BslI	CCNNNNNNNGG	7	4			NV
-BsmAI	GTCTC	6	10			NV
-BsmBI	CGTCTC	7	11			NS
-BsmFI	GGGAC	15	19			N
-BsmI	GAATGC	7	5			JNV
-BsnI	GGCC	2	2			V
-Bso31I	GGTCTC	7	11			IV
-BsoBI	CYCGRG	1	5			N
-Bsp119I	TTCGAA	2	4			B
-Bsp120I	GGGCCC	1	5			B
-Bsp1286I	GDGCHC	5	1			JNR
-Bsp13I	TCCGGA	1	5			IV
-Bsp1407I	TGTACA	1	5			B
-Bsp143I	GATC	0	4			BV
-Bsp1720I	GCTNAGC	2	5			IV
-Bsp19I	CCATGG	1	5			IV
-Bsp68I	TCGCGA	3	3			B
-BspACI	CCGC	1	3			I
-BspCNI	CTCAG	14	12			N
-BspDI	ATCGAT	2	4			N
-BspEI	TCCGGA	1	5			NV
-BspFNI	CGCG	2	2			I
-BspHI	TCATGA	1	5			NX
-BspLI	GGNNCC	3	3			B
-BspMI	ACCTGC	10	14			N
-BspOI	GCTAGC	5	1			B
-BspPI	GGATC	9	10			B
-BspQI	GCTCTTC	8	11			KN
-BspTI	CTTAAG	1	5			B
-BsrBI	CCGCTC	3	3			NV
-BsrDI	GCAATG	8	6			NV
-BsrFI	RCCGGY	1	5			N
-BsrGI	TGTACA	1	5			NS
-BsrI	ACTGG	6	4			NV
-BsrSI	ACTGG	6	4			R
-BssECI	CCNNGG	1	5			I
-BssHII	GCGCGC	1	5			JNQRVX
-BssMI	GATC	0	4			V
-BssNAI	GTATAC	3	3			IV
-BssNI	GRCGYC	2	4			V
-BssSI	CACGAG	1	5			N
-BssT1I	CCWWGG	1	5			IV
-Bst1107I	GTATAC	3	3			BV
-Bst2BI	CACGAG	1	5			I
-Bst2UI	CCWGG	2	3			IV
-Bst4CI	ACNGT	3	2			IV
-Bst6I	CTCTTC	7	10			IV
-Bst98I	CTTAAG	1	5			RV
-BstACI	GRCGYC	2	4			I
-BstAFI	CTTAAG	1	5			I
-BstAPI	GCANNNNNTGC	7	4			IN
-BstAUI	TGTACA	1	5			IV
-BstBAI	YACGTR	3	3			IV
-BstBI	TTCGAA	2	4			NS
-BstC8I	GCNNGC	3	3			I
-BstDEI	CTNAG	1	4			IV
-BstDSI	CCRYGG	1	5			IV
-BstEII	GGTNACC	1	6			JNRSV
-BstENI	CCTNNNNNAGG	5	6			IV
-BstF5I	GGATG	7	5			I
-BstFI	AAGCTT	1	5			V
-BstFNI	CGCG	2	2			IV
-BstH2I	RGCGCY	5	1			IV
-BstHHI	GCGC	3	1			IV
-BstKTI	GATC	3	1			I
-BstMAI	GTCTC	6	10			IV
-BstMBI	GATC	0	4			IV
-BstMCI	CGRYCG	4	2			IV
-BstMWI	GCNNNNNNNGC	7	4			I
-BstNI	CCWGG	2	3			NV
-BstNSI	RCATGY	5	1			IV
-BstOI	CCWGG	2	3			R
-BstPAI	GACNNNNGTC	5	5			IV
-BstSCI	CCNGG	0	5			I
-BstSFI	CTRYAG	1	5			I
-BstSLI	GKGCMC	5	1			I
-BstSNI	TACGTA	3	3			IV
-BstUI	CGCG	2	2			NV
-BstV1I	GCAGC	13	17			I
-BstV2I	GAAGAC	8	12			IV
-BstX2I	RGATCY	1	5			IV
-BstXI	CCANNNNNNTGG	8	4			BIJNQRVX
-BstYI	RGATCY	1	5			N
-BstZ17I	GTATAC	3	3			N
-BstZI	CGGCCG	1	5			R
-Bsu15I	ATCGAT	2	4			B
-Bsu36I	CCTNAGG	2	5			NR
-BsuI	GTATCC	12	11			I
-BsuRI	GGCC	2	2			BIV
-BtgI	CCRYGG	1	5			N
-BtgZI	GCGATG	16	20			N
-BtrI	CACGTC	3	3			I
-BtsCI	GGATG	7	5			N
-BtsI	GCAGTG	8	6			N
-BtsIMutI	CAGTG	7	5			N
-BtuMI	TCGCGA	3	3			V
-BveI	ACCTGC	10	14			B
-Cac8I	GCNNGC	3	3			N
-CaiI	CAGNNNCTG	6	3			B
-CciI	TCATGA	1	5			I
-CciNI	GCGGCCGC	2	6			IV
-CelII	GCTNAGC	2	5			V
-CfoI	GCGC	3	1			R
-Cfr10I	RCCGGY	1	5			BV
-Cfr13I	GGNCC	1	4			BV
-Cfr42I	CCGCGG	4	2			BV
-Cfr9I	CCCGGG	1	5			B
-ClaI	ATCGAT	2	4			NQRSVX
-CpoI	CGGWCCG	2	5			B
-CseI	GACGC	10	15			B
-Csp45I	TTCGAA	2	4			R
-Csp6I	GTAC	1	3			B
-CspCI	CAANNNNNGTGG	-11	-13	24	22	N
-CspI	CGGWCCG	2	5			R
-CviJI	RGCY	2	2			QX
-CviKI-1	RGCY	2	2			N
-CviQI	GTAC	1	3			N
-DdeI	CTNAG	1	4			NQRVX
-DinI	GGCGCC	3	3			V
-DpnI	GATC	2	2			BENOQRSX
-DpnII	GATC	0	4			NS
-DraI	TTTAAA	3	3			BIJNQRSVX
-DraIII	CACNNNGTG	6	3			INV
-DrdI	GACNNNNNNGTC	7	5			N
-DriI	GACNNNNNGTC	6	5			I
-DsaI	CCRYGG	1	5			V
-DseDI	GACNNNNNNGTC	7	5			IV
-EaeI	YGGCCR	1	5			N
-EagI	CGGCCG	1	5			NSV
-Eam1104I	CTCTTC	7	10			B
-Eam1105I	GACNNNNNGTC	6	5			BV
-EarI	CTCTTC	7	10			NV
-EciI	GGCGGA	17	15			N
-Ecl136II	GAGCTC	3	3			B
-EclHKI	GACNNNNNGTC	6	5			R
-Eco105I	TACGTA	3	3			B
-Eco130I	CCWWGG	1	5			B
-Eco147I	AGGCCT	3	3			B
-Eco24I	GRGCYC	5	1			B
-Eco31I	GGTCTC	7	11			BV
-Eco32I	GATATC	3	3			B
-Eco47I	GGWCC	1	4			B
-Eco47III	AGCGCT	3	3			BRS
-Eco52I	CGGCCG	1	5			B
-Eco53kI	GAGCTC	3	3			N
-Eco57I	CTGAAG	22	20			B
-Eco72I	CACGTG	3	3			B
-Eco81I	CCTNAGG	2	5			B
-Eco88I	CYCGRG	1	5			B
-Eco91I	GGTNACC	1	6			B
-EcoICRI	GAGCTC	3	3			IRV
-EcoNI	CCTNNNNNAGG	5	6			NV
-EcoO109I	RGGNCCY	2	5			BJN
-EcoRI	GAATTC	1	5			BIJNQRSVX
-EcoRII	CCWGG	0	5			BJSV
-EcoRV	GATATC	3	3			IJNQRSVX
-EcoT38I	GRGCYC	5	1			J
-EgeI	GGCGCC	3	3			IV
-EheI	GGCGCC	3	3			B
-ErhI	CCWWGG	1	5			I
-Esp3I	CGTCTC	7	11			BNS
-FaeI	CATG	4	0			I
-FaiI	YATR	2	2			I
-FalI	AAGNNNNNCTT	-8	-13	24	19	I
-FaqI	GGGAC	15	19			B
-FatI	CATG	0	4			IN
-FauI	CCCGC	9	11			IN
-FauNDI	CATATG	2	4			IV
-FblI	GTMKAC	2	4			I
-Fnu4HI	GCNGC	2	3			N
-FokI	GGATG	14	18			IJNVX
-FriOI	GRGCYC	5	1			IV
-FseI	GGCCGGCC	6	2			N
-Fsp4HI	GCNGC	2	3			I
-FspAI	RTGCGCAY	4	4			B
-FspBI	CTAG	1	3			B
-FspI	TGCGCA	3	3			JNS
-GlaI	GCGC	2	2			I
-GluI	GCNGC	2	3			I
-GsaI	CCCAGC	5	1			I
-GsuI	CTGGAG	22	20			B
-HaeII	RGCGCY	5	1			JNRV
-HaeIII	GGCC	2	2			IJNQRVX
-HgaI	GACGC	10	15			IN
-HhaI	GCGC	3	1			BJNQRVX
-Hin1I	GRCGYC	2	4			BV
-Hin1II	CATG	4	0			B
-Hin6I	GCGC	1	3			B
-HincII	GTYRAC	3	3			BJNQRVX
-HindII	GTYRAC	3	3			I
-HindIII	AAGCTT	1	5			BIJNQRSVX
-HinfI	GANTC	1	4			BIJNQRSVX
-HinP1I	GCGC	1	3			N
-HpaI	GTTAAC	3	3			IJNQRSVX
-HpaII	CCGG	1	3			BINQRSVX
-HphI	GGTGA	13	12			BNV
-Hpy166II	GTNNAC	3	3			N
-Hpy188I	TCNGA	3	2			N
-Hpy188III	TCNNGA	2	4			N
-Hpy8I	GTNNAC	3	3			B
-Hpy99I	CGWCG	5	0			N
-HpyAV	CCTTC	11	10			N
-HpyCH4III	ACNGT	3	2			N
-HpyCH4IV	ACGT	1	3			N
-HpyCH4V	TGCA	2	2			N
-HpyF10VI	GCNNNNNNNGC	7	4			B
-HpyF3I	CTNAG	1	4			B
-HpySE526I	ACGT	1	3			I
-Hsp92I	GRCGYC	2	4			R
-Hsp92II	CATG	4	0			R
-HspAI	GCGC	1	3			IV
-KasI	GGCGCC	1	5			N
-Kpn2I	TCCGGA	1	5			B
-KpnI	GGTACC	5	1			BIJNQRSVX
-KroI	GCCGGC	1	5			I
-KroNI	GCCGGC	3	3			I
-Ksp22I	TGATCA	1	5			IV
-KspAI	GTTAAC	3	3			BV
-KspI	CCGCGG	4	2			S
-Kzo9I	GATC	0	4			IV
-LguI	GCTCTTC	8	11			B
-LmnI	GCTCC	6	4			I
-Lsp1109I	GCAGC	13	17			B
-LweI	GCATC	10	14			B
-MabI	ACCWGGT	1	6			I
-MalI	GATC	2	2			I
-MamI	GATNNNNATC	5	5			V
-MauBI	CGCGCGCG	2	6			B
-MbiI	CCGCTC	3	3			BV
-MboI	GATC	0	4			BNQRVX
-MboII	GAAGA	13	12			BIJNQRVX
-MfeI	CAATTG	1	5			IN
-MhlI	GDGCHC	5	1			IV
-MlsI	TGGCCA	3	3			BV
-MluCI	AATT	0	4			N
-MluI	ACGCGT	1	5			BIJNQRSVX
-Mly113I	GGCGCC	2	4			I
-MlyI	GAGTC	10	10			N
-MmeI	TCCRAC	26	24			N
-MnlI	CCTC	11	10			BINQSVX
-Mox20I	TGGCCA	3	3			I
-Mph1103I	ATGCAT	5	1			B
-MreI	CGCCGGCG	2	6			B
-MroI	TCCGGA	1	5			V
-MroNI	GCCGGC	1	5			IV
-MroXI	GAANNNNTTC	5	5			IV
-MscI	TGGCCA	3	3			N
-MseI	TTAA	1	3			NV
-MslI	CAYNNNNRTG	5	5			N
-Msp20I	TGGCCA	3	3			V
-MspA1I	CMGCKG	3	3			INRV
-MspI	CCGG	1	3			BIJNQRSVX
-MspJI	CNNR	13	17			N
-MspR9I	CCNGG	2	3			I
-MssI	GTTTAAAC	4	4			B
-MteI	GCGCNGCGC	4	5			I
-MunI	CAATTG	1	5			B
-Mva1269I	GAATGC	7	5			B
-MvaI	CCWGG	2	3			B
-MwoI	GCNNNNNNNGC	7	4			N
-NaeI	GCCGGC	3	3			NR
-NarI	GGCGCC	2	4			JNQRVX
-NciI	CCSGG	2	3			JNRV
-NcoI	CCATGG	1	5			BJNQRSVX
-NdeI	CATATG	2	4			BJNQRSVX
-NdeII	GATC	0	4			JR
-NgoMIV	GCCGGC	1	5			N
-NheI	GCTAGC	1	5			BJNQRVX
-NlaIII	CATG	4	0			N
-NlaIV	GGNNCC	3	3			NV
-NmeAIII	GCCGAG	27	25			N
-NmuCI	GTSAC	0	5			B
-NotI	GCGGCCGC	2	6			BJNQRSVX
-NruI	TCGCGA	3	3			IJNQRSVX
-NsbI	TGCGCA	3	3			B
-NsiI	ATGCAT	5	1			JNQRSVX
-NspI	RCATGY	5	1			NV
-NspV	TTCGAA	2	4			J
-OliI	CACNNNNGTG	5	5			B
-PacI	TTAATTAA	5	3			BNS
-PaeI	GCATGC	5	1			B
-PaeR7I	CTCGAG	1	5			NV
-PagI	TCATGA	1	5			B
-PalAI	GGCGCGCC	2	6			I
-PaqCI	CACCTGC	11	15			N
-PasI	CCCWGGG	2	5			B
-PauI	GCGCGC	1	5			B
-PceI	AGGCCT	3	3			IV
-PciI	ACATGT	1	5			IN
-PciSI	GCTCTTC	8	11			I
-PcsI	WCGNNNNNNNCGW	7	6			I
-PctI	GAATGC	7	5			I
-PdiI	GCCGGC	3	3			B
-PdmI	GAANNNNTTC	5	5			B
-PfeI	GAWTC	1	4			B
-Pfl23II	CGTACG	1	5			B
-PflFI	GACNNNGTC	4	5			NV
-PflMI	CCANNNNNTGG	7	4			NV
-PfoI	TCCNGGA	1	6			B
-PinAI	ACCGGT	1	5			QVX
-PkrI	GCNGC	3	2			I
-Ple19I	CGATCG	4	2			I
-PleI	GAGTC	9	10			N
-PluTI	GGCGCC	5	1			N
-PmeI	GTTTAAAC	4	4			NS
-PmlI	CACGTG	3	3			NV
-PpsI	GAGTC	9	10			I
-Ppu21I	YACGTR	3	3			B
-PpuMI	RGGWCCY	2	5			N
-PscI	ACATGT	1	5			B
-PshAI	GACNNNNGTC	5	5			NV
-PsiI	TTATAA	3	3			IN
-Psp124BI	GAGCTC	5	1			IV
-Psp1406I	AACGTT	2	4			B
-Psp5II	RGGWCCY	2	5			B
-Psp6I	CCWGG	0	5			I
-PspCI	CACGTG	3	3			IV
-PspEI	GGTNACC	1	6			IV
-PspGI	CCWGG	0	5			NS
-PspLI	CGTACG	1	5			I
-PspN4I	GGNNCC	3	3			I
-PspOMI	GGGCCC	1	5			INV
-PspPPI	RGGWCCY	2	5			I
-PspXI	VCTCGAGB	2	6			IN
-PsrI	GAACNNNNNNTAC	-7	-12	25	20	I
-PstI	CTGCAG	5	1			BIJNQRSVX
-PstNI	CAGNNNCTG	6	3			I
-PsuI	RGATCY	1	5			B
-PsyI	GACNNNGTC	4	5			B
-PvuI	CGATCG	4	2			BNQRX
-PvuII	CAGCTG	3	3			BIJNQRSVX
-RgaI	GCGATCGC	5	3			I
-RigI	GGCCGGCC	6	2			I
-RsaI	GTAC	2	2			BIJNQRVX
-RsaNI	GTAC	1	3			I
-RseI	CAYNNNNRTG	5	5			B
-Rsr2I	CGGWCCG	2	5			IV
-RsrII	CGGWCCG	2	5			NQX
-SacI	GAGCTC	5	1			BJNQRSVX
-SacII	CCGCGG	4	2			JNQRSVX
-SalI	GTCGAC	1	5			BIJNQRSVX
-SapI	GCTCTTC	8	11			N
-SatI	GCNGC	2	3			B
-Sau3AI	GATC	0	4			JNRVX
-Sau96I	GGNCC	1	4			JNV
-SbfI	CCTGCAGG	6	2			INSV
-ScaI	AGTACT	3	3			BJNQRVX
-SchI	GAGTC	10	10			B
-ScrFI	CCNGG	2	3			JNVX
-SdaI	CCTGCAGG	6	2			BV
-SduI	GDGCHC	5	1			B
-SetI	ASST	4	0			I
-SexAI	ACCWGGT	1	6			N
-SfaAI	GCGATCGC	5	3			B
-SfaNI	GCATC	10	14			INV
-SfcI	CTRYAG	1	5			N
-SfiI	GGCCNNNNNGGCC	8	5			BIJNQRSVX
-SfoI	GGCGCC	3	3			NV
-Sfr274I	CTCGAG	1	5			IV
-Sfr303I	CCGCGG	4	2			IV
-SfuI	TTCGAA	2	4			V
-SgeI	CNNG	13	17			B
-SgfI	GCGATCGC	5	3			R
-SgrAI	CRCCGGYG	2	6			N
-SgrDI	CGTCGACG	2	6			B
-SgsI	GGCGCGCC	2	6			B
-SinI	GGWCC	1	4			R
-SmaI	CCCGGG	3	3			BIJNQRSVX
-SmiI	ATTTAAAT	4	4			BIV
-SmiMI	CAYNNNNRTG	5	5			IV
-SmlI	CTYRAG	1	5			N
-SmoI	CTYRAG	1	5			B
-SnaBI	TACGTA	3	3			NR
-SpeI	ACTAGT	1	5			JNQRVX
-SphI	GCATGC	5	1			IJNQRSVX
-SrfI	GCCCGGGC	4	4			N
-Sse9I	AATT	0	4			IV
-SsiI	CCGC	1	3			B
-SspDI	GGCGCC	1	5			B
-SspI	AATATT	3	3			BIJNQRSVX
-SspMI	CTAG	1	3			I
-StuI	AGGCCT	3	3			JNQRSX
-StyD4I	CCNGG	0	5			N
-StyI	CCWWGG	1	5			JNR
-SwaI	ATTTAAAT	4	4			JN
-TaaI	ACNGT	3	2			B
-TaiI	ACGT	4	0			B
-TaqI	TCGA	1	3			BIJNQRVX
-TaqII	GACCGA	17	15			QX
-TasI	AATT	0	4			BV
-TatI	WGTACW	1	5			B
-TauI	GCSGC	4	1			B
-TfiI	GAWTC	1	4			N
-Tru1I	TTAA	1	3			B
-Tru9I	TTAA	1	3			IRV
-TscAI	CASTG	7	-2			B
-TseFI	GTSAC	0	5			I
-TseI	GCWGC	1	4			N
-Tsp45I	GTSAC	0	5			N
-TspDTI	ATGAA	16	14			QX
-TspGWI	ACGGA	16	14			QX
-TspMI	CCCGGG	1	5			N
-TspRI	CASTG	7	-2			N
-Tth111I	GACNNNGTC	4	5			INQRVX
-Van91I	CCANNNNNTGG	7	4			BV
-Vha464I	CTTAAG	1	5			V
-VneI	GTGCAC	1	5			IV
-VspI	ATTAAT	2	4			BIRV
-XagI	CCTNNNNNAGG	5	6			BV
-XapI	RAATTY	1	5			BV
-XbaI	TCTAGA	1	5			BIJMNQRSVX
-XceI	RCATGY	5	1			BV
-XcmI	CCANNNNNNNNNTGG	8	7			N
-XhoI	CTCGAG	1	5			BJNQRVX
-XhoII	RGATCY	1	5			RV
-XmaCI	CCCGGG	1	5			V
-XmaI	CCCGGG	1	5			INRV
-XmaJI	CCTAGG	1	5			BV
-XmiI	GTMKAC	2	4			BV
-XmnI	GAANNNNTTC	5	5			NRV
-ZraI	GACGTC	3	3			INV
-ZrmI	AGTACT	3	3			IV
-Zsp2I	ATGCAT	5	1			V
+# The last five columns say what Dam, Dcm, CpG, EcoBI and EcoKI methylation do to the enzyme when a
+# methylated base lies in its site, from REBASE's methylation sensitivity pages: c = cut as usual,
+# b = blocked, i = impaired, v = varies between sites, r = required for cutting, - = the methylase's
+# motif cannot overlap the site, ? = no data.
+# Regenerate with: slopgene enzymes import-rebase --emboss-e link_emboss_e --emboss-r link_emboss_r,
+# and scripts/rebase-methylation.py for the methylation columns.
+name	site	top1	bottom1	top2	bottom2	suppliers	dam	dcm	cpg	ecobi	ecoki
+AanI	TTATAA	3	3			B	-	-	-	-	?
+AarI	CACCTGC	11	15			B	-	-	i	?	?
+AatII	GACGTC	5	1			BINRV	-	-	b	c	-
+AbsI	CCTCGAGG	2	6			I	-	-	?	-	-
+Acc16I	TGCGCA	3	3			IV	-	-	?	-	?
+Acc36I	ACCTGC	10	14			I	-	-	?	?	?
+Acc65I	GGTACC	1	5			BINRV	-	v	v	-	-
+AccB1I	GGYRCC	1	5			IV	-	?	?	-	?
+AccB7I	CCANNNNNTGG	7	4			IRV	-	v	-	-	-
+AccBSI	CCGCTC	3	3			IV	-	-	c	?	-
+AccI	GTMKAC	2	4			JNQRVX	-	-	b	-	-
+AccII	CGCG	2	2			J	-	-	b	-	-
+AccIII	TCCGGA	1	5			JR	b	-	c	-	-
+AciI	CCGC	1	3			N	-	-	b	-	-
+AclI	AACGTT	2	4			INV	-	-	b	v	v
+AclWI	GGATC	9	10			I	?	?	?	?	-
+AcoI	YGGCCR	1	5			I	-	?	?	-	-
+AcsI	RAATTY	1	5			IV	-	-	?	?	-
+AcuI	CTGAAG	22	20			IN	-	-	-	i	-
+AcvI	CACGTG	3	3			QX	-	-	?	?	?
+AcyI	GRCGYC	2	4			JV	-	?	?	?	-
+AdeI	CACNNNGTG	6	3			B	-	-	v	b	?
+AfeI	AGCGCT	3	3			IN	-	-	b	c	-
+AfiI	CCNNNNNNNGG	7	4			V	-	?	?	-	-
+AflII	CTTAAG	1	5			JN	-	-	-	-	-
+AflIII	ACRYGT	1	5			N	-	-	i	v	v
+AgeI	ACCGGT	1	5			JNRSV	-	-	b	c	c
+AgsI	TTSAA	3	2			I	-	-	-	?	b
+AhdI	GACNNNNNGTC	6	5			NV	-	-	v	-	-
+AhlI	ACTAGT	1	5			IV	-	-	-	?	?
+AjiI	CACGTC	3	3			B	-	-	b	?	?
+AjnI	CCWGG	0	5			I	-	c	-	-	-
+AjuI	GAANNNNNNNTTGG	-7	-12	25	20	B	-	-	c	-	-
+AleI	CACNNNNGTG	5	5			IN	-	-	i	b	b
+AlfI	GCANNNNNNTGC	-10	-12	24	22	B	-	-	c	-	-
+AloI	GAACNNNNNNTCC	-7	-12	25	20	B	?	c	v	-	-
+AluBI	AGCT	2	2			I	-	-	-	b	-
+AluI	AGCT	2	2			BIJNQRVX	-	-	-	b	-
+Alw21I	GWGCWC	5	1			BV	-	-	c	c	c
+Alw26I	GTCTC	6	10			BV	-	-	v	?	-
+Alw44I	GTGCAC	1	5			BJRV	-	-	b	-	c
+AlwI	GGATC	9	10			N	b	c	c	c	-
+AlwNI	CAGNNNCTG	6	3			N	-	b	-	v	-
+Ama87I	CYCGRG	1	5			IV	-	-	?	-	-
+Aor13HI	TCCGGA	1	5			V	?	-	?	-	-
+AoxI	GGCC	0	4			I	-	?	?	-	-
+ApaI	GGGCCC	5	1			BIJNQRVX	-	v	v	-	-
+ApaLI	GTGCAC	1	5			NSV	-	-	b	-	v
+ApeKI	GCWGC	1	4			N	-	-	v	c	-
+ApoI	RAATTY	1	5			NV	-	-	c	v	-
+ArsI	GACNNNNNNTTYG	-8	-13	24	19	I	-	-	?	-	-
+AscI	GGCGCGCC	2	6			NS	-	c	v	-	-
+AseI	ATTAAT	2	4			JNV	-	-	-	v	-
+AsiGI	ACCGGT	1	5			IV	-	-	?	?	?
+AsiSI	GCGATCGC	5	3			IN	c	-	v	-	-
+AspA2I	CCTAGG	1	5			IV	-	-	-	-	-
+AspEI	GACNNNNNGTC	6	5			V	-	-	?	-	-
+AspLEI	GCGC	3	1			IV	-	-	b	-	-
+AspS9I	GGNCC	1	4			IV	-	b	b	-	-
+AsuC2I	CCSGG	2	3			I	-	-	?	-	-
+AsuHPI	GGTGA	13	12			IV	?	?	?	?	-
+AsuII	TTCGAA	2	4			V	-	-	c	-	?
+AsuNHI	GCTAGC	1	5			IV	-	-	c	-	-
+AvaI	CYCGRG	1	5			JNQRVX	-	-	b	-	-
+AvaII	GGWCC	1	4			JNRVX	-	b	b	-	-
+AviII	TGCGCA	3	3			V	-	-	b	-	?
+AvrII	CCTAGG	1	5			NSVX	-	-	-	-	-
+AxyI	CCTNAGG	2	5			J	-	-	-	?	-
+BaeGI	GKGCMC	5	1			N	-	c	c	-	v
+BaeI	ACNNNNGTAYC	-10	-15	23	18	N	-	c	v	b	-
+BalI	TGGCCA	3	3			JQRVX	-	i	-	-	-
+BamHI	GGATCC	1	5			BIJNQRSVX	c	c	c	-	-
+BanI	GGYRCC	1	5			NRV	-	v	v	-	i
+BanII	GRGCYC	5	1			NRVX	-	c	c	c	-
+BarI	GAAGNNNNNNTAC	-7	-12	25	20	I	-	-	?	-	-
+BauI	CACGAG	1	5			B	-	-	c	?	?
+BbrPI	CACGTG	3	3			V	-	-	b	?	?
+BbsI	GAAGAC	8	12			NV	-	-	c	c	-
+BbuI	GCATGC	5	1			R	-	-	?	b	-
+Bbv12I	GWGCWC	5	1			I	-	-	?	?	?
+BbvCI	CCTCAGC	2	5			N	-	-	i	c	-
+BbvI	GCAGC	13	17			N	-	-	c	c	-
+BccI	CCATC	9	10			N	-	-	c	c	-
+BceAI	ACGGC	17	19			N	-	-	b	b	b
+BcgI	CGANNNNNNTGC	-10	-12	24	22	N	?	?	?	?	?
+BciVI	GTATCC	12	11			N	-	c	c	-	-
+BclI	TGATCA	1	5			BJNRSV	b	-	-	?	-
+BcnI	CCSGG	2	3			B	-	-	i	-	-
+BcoDI	GTCTC	6	10			N	-	-	i	c	-
+BcuI	ACTAGT	1	5			B	-	-	-	?	?
+BfaI	CTAG	1	3			N	-	-	-	-	-
+BfmI	CTRYAG	1	5			B	-	-	-	-	-
+BfuAI	ACCTGC	10	14			N	-	-	i	b	b
+BfuI	GTATCC	12	11			B	-	c	c	-	-
+BglI	GCCNNNNNGGC	7	4			BIJNQRX	-	c	v	-	-
+BglII	AGATCT	1	5			BIJNQRSX	c	-	-	v	-
+BlpI	GCTNAGC	2	5			NV	-	-	c	c	-
+BlsI	GCNGC	3	2			I	-	-	?	-	-
+BmcAI	AGTACT	3	3			V	-	-	-	?	-
+Bme1390I	CCNGG	2	3			B	-	b	?	-	-
+Bme18I	GGWCC	1	4			IV	-	?	?	-	-
+BmeRI	GACNNNNNGTC	6	5			V	-	-	?	-	-
+BmgBI	CACGTC	3	3			N	-	-	v	v	i
+BmiI	GGNNCC	3	3			V	-	?	?	-	-
+BmrFI	CCNGG	2	3			V	-	?	?	-	-
+BmrI	ACTGGG	11	10			N	-	-	-	b	b
+BmtI	GCTAGC	5	1			INV	-	-	c	-	-
+BmuI	ACTGGG	11	10			I	-	-	-	?	?
+BmyI	GDGCHC	5	1			V	-	?	?	?	?
+BoxI	GACNNNNGTC	5	5			BV	-	-	v	?	-
+BpiI	GAAGAC	8	12			B	-	-	c	?	-
+BplI	GAGNNNNNCTC	-8	-13	24	19	B	-	-	c	-	-
+BpmI	CTGGAG	22	20			IN	-	c	-	-	-
+Bpu10I	CCTNAGC	2	5			BINV	-	-	c	c	-
+Bpu1102I	GCTNAGC	2	5			B	-	-	c	?	-
+Bpu14I	TTCGAA	2	4			IV	-	-	?	-	?
+BpuEI	CTTGAG	22	20			N	-	-	-	b	-
+BpuMI	CCSGG	2	3			V	-	-	?	-	-
+Bsa29I	ATCGAT	2	4			I	b	-	?	?	-
+BsaAI	YACGTR	3	3			NV	-	-	b	i	i
+BsaBI	GATNNNNATC	5	5			NV	b	-	v	v	-
+BsaHI	GRCGYC	2	4			NV	-	v	v	c	-
+BsaI	GGTCTC	7	11			NSV	-	v	v	c	-
+BsaJI	CCNNGG	1	5			N	-	c	c	-	-
+BsaMI	GAATGC	7	5			RV	-	-	?	?	-
+BsaWI	WCCGGW	1	5			N	c	-	c	i	i
+BsaXI	ACNNNNNCTCC	-9	-12	21	18	N	-	c	c	-	-
+Bsc4I	CCNNNNNNNGG	7	4			IV	-	b	b	-	-
+Bse118I	RCCGGY	1	5			IV	-	-	?	?	?
+Bse1I	ACTGG	6	4			IV	-	-	-	b	b
+Bse21I	CCTNAGG	2	5			I	-	-	-	?	-
+Bse3DI	GCAATG	8	6			I	-	-	c	?	-
+Bse8I	GATNNNNATC	5	5			IV	b	-	v	b	-
+BseBI	CCWGG	2	3			V	-	?	-	-	-
+BseDI	CCNNGG	1	5			B	-	?	c	-	-
+BseGI	GGATG	7	5			B	-	c	c	?	-
+BseJI	GATNNNNATC	5	5			B	b	-	c	b	-
+BseLI	CCNNNNNNNGG	7	4			B	-	v	v	-	-
+BseMI	GCAATG	8	6			B	-	-	c	?	-
+BseMII	CTCAG	15	13			B	-	-	-	?	-
+BseNI	ACTGG	6	4			B	-	-	-	?	?
+BsePI	GCGCGC	1	5			IV	-	-	?	-	-
+BseRI	GAGGAG	16	14			N	-	-	c	c	-
+BseSI	GKGCMC	5	1			B	-	c	c	-	i
+BseX3I	CGGCCG	1	5			IV	-	-	?	-	-
+BseXI	GCAGC	13	17			B	-	-	c	?	-
+BseYI	CCCAGC	1	5			N	-	-	b	-	-
+BsgI	GTGCAG	22	20			N	-	-	c	-	b
+Bsh1236I	CGCG	2	2			B	-	-	b	-	-
+Bsh1285I	CGRYCG	4	2			B	b	-	b	-	-
+BshNI	GGYRCC	1	5			B	-	v	v	-	?
+BshTI	ACCGGT	1	5			B	-	-	b	?	?
+BshVI	ATCGAT	2	4			V	?	-	?	?	-
+BsiEI	CGRYCG	4	2			NV	c	-	v	-	-
+BsiHKAI	GWGCWC	5	1			NV	-	-	c	i	i
+BsiHKCI	CYCGRG	1	5			QX	-	-	?	-	-
+BsiWI	CGTACG	1	5			N	-	-	b	-	-
+BslFI	GGGAC	15	19			I	-	?	?	-	-
+BslI	CCNNNNNNNGG	7	4			NV	-	v	v	-	-
+BsmAI	GTCTC	6	10			NV	-	-	v	c	-
+BsmBI	CGTCTC	7	11			NS	-	-	v	i	-
+BsmFI	GGGAC	15	19			N	-	b	b	-	-
+BsmI	GAATGC	7	5			JNV	-	-	c	b	-
+BsnI	GGCC	2	2			V	-	?	?	-	-
+Bso31I	GGTCTC	7	11			IV	-	i	i	?	-
+BsoBI	CYCGRG	1	5			N	-	-	c	-	-
+Bsp119I	TTCGAA	2	4			B	-	-	b	-	?
+Bsp120I	GGGCCC	1	5			B	-	b	b	-	-
+Bsp1286I	GDGCHC	5	1			JNR	-	c	c	c	c
+Bsp13I	TCCGGA	1	5			IV	?	-	?	-	-
+Bsp1407I	TGTACA	1	5			B	-	-	-	-	-
+Bsp143I	GATC	0	4			BV	c	-	b	c	-
+Bsp1720I	GCTNAGC	2	5			IV	-	-	c	c	-
+Bsp19I	CCATGG	1	5			IV	-	-	-	-	-
+Bsp68I	TCGCGA	3	3			B	c	-	b	-	-
+BspACI	CCGC	1	3			I	-	-	?	-	-
+BspCNI	CTCAG	14	12			N	-	-	-	i	-
+BspDI	ATCGAT	2	4			N	b	-	b	v	-
+BspEI	TCCGGA	1	5			NV	b	-	i	-	-
+BspFNI	CGCG	2	2			I	-	-	?	-	-
+BspHI	TCATGA	1	5			NX	v	-	-	v	-
+BspLI	GGNNCC	3	3			B	-	v	v	-	-
+BspMI	ACCTGC	10	14			N	-	-	c	b	b
+BspOI	GCTAGC	5	1			B	-	-	?	-	-
+BspPI	GGATC	9	10			B	b	c	c	?	-
+BspQI	GCTCTTC	8	11			KN	-	-	c	c	-
+BspTI	CTTAAG	1	5			B	-	-	-	-	-
+BsrBI	CCGCTC	3	3			NV	-	-	v	c	-
+BsrDI	GCAATG	8	6			NV	-	-	c	v	-
+BsrFI	RCCGGY	1	5			N	-	-	v	c	c
+BsrGI	TGTACA	1	5			NS	-	-	-	-	-
+BsrI	ACTGG	6	4			NV	-	-	-	b	b
+BsrSI	ACTGG	6	4			R	-	-	-	?	?
+BssECI	CCNNGG	1	5			I	-	?	c	-	-
+BssHII	GCGCGC	1	5			JNQRVX	-	-	v	-	-
+BssMI	GATC	0	4			V	?	-	?	?	-
+BssNAI	GTATAC	3	3			IV	-	-	?	-	-
+BssNI	GRCGYC	2	4			V	-	?	?	?	-
+BssSI	CACGAG	1	5			N	-	-	c	c	c
+BssT1I	CCWWGG	1	5			IV	-	-	-	-	-
+Bst1107I	GTATAC	3	3			BV	-	-	v	-	-
+Bst2BI	CACGAG	1	5			I	-	-	?	?	?
+Bst2UI	CCWGG	2	3			IV	-	c	-	-	-
+Bst4CI	ACNGT	3	2			IV	-	-	?	?	?
+Bst6I	CTCTTC	7	10			IV	-	-	b	?	-
+Bst98I	CTTAAG	1	5			RV	-	-	-	-	-
+BstACI	GRCGYC	2	4			I	-	?	?	?	-
+BstAFI	CTTAAG	1	5			I	-	-	-	-	-
+BstAPI	GCANNNNNTGC	7	4			IN	-	-	v	b	-
+BstAUI	TGTACA	1	5			IV	-	-	-	-	-
+BstBAI	YACGTR	3	3			IV	-	-	?	?	?
+BstBI	TTCGAA	2	4			NS	-	-	b	-	v
+BstC8I	GCNNGC	3	3			I	-	-	b	-	-
+BstDEI	CTNAG	1	4			IV	-	-	-	c	-
+BstDSI	CCRYGG	1	5			IV	-	-	?	-	-
+BstEII	GGTNACC	1	6			JNRSV	-	c	c	i	i
+BstENI	CCTNNNNNAGG	5	6			IV	-	?	-	?	-
+BstF5I	GGATG	7	5			I	-	c	c	b	-
+BstFI	AAGCTT	1	5			V	-	-	-	?	-
+BstFNI	CGCG	2	2			IV	-	-	?	-	-
+BstH2I	RGCGCY	5	1			IV	-	?	?	?	-
+BstHHI	GCGC	3	1			IV	-	-	c	-	-
+BstKTI	GATC	3	1			I	b	-	c	v	-
+BstMAI	GTCTC	6	10			IV	-	-	c	?	-
+BstMBI	GATC	0	4			IV	?	-	?	?	-
+BstMCI	CGRYCG	4	2			IV	?	-	?	-	-
+BstMWI	GCNNNNNNNGC	7	4			I	-	-	v	-	-
+BstNI	CCWGG	2	3			NV	-	c	-	-	-
+BstNSI	RCATGY	5	1			IV	-	-	?	?	?
+BstOI	CCWGG	2	3			R	-	c	-	-	-
+BstPAI	GACNNNNGTC	5	5			IV	-	-	?	?	-
+BstSCI	CCNGG	0	5			I	-	b	?	-	-
+BstSFI	CTRYAG	1	5			I	-	-	-	-	-
+BstSLI	GKGCMC	5	1			I	-	c	c	-	?
+BstSNI	TACGTA	3	3			IV	-	-	?	-	-
+BstUI	CGCG	2	2			NV	-	-	b	-	-
+BstV1I	GCAGC	13	17			I	-	-	c	i	-
+BstV2I	GAAGAC	8	12			IV	-	-	c	?	-
+BstX2I	RGATCY	1	5			IV	?	?	?	?	-
+BstXI	CCANNNNNNTGG	8	4			BIJNQRVX	-	v	-	-	-
+BstYI	RGATCY	1	5			N	c	c	c	i	-
+BstZ17I	GTATAC	3	3			N	-	-	v	-	-
+BstZI	CGGCCG	1	5			R	-	-	?	-	-
+Bsu15I	ATCGAT	2	4			B	b	-	b	?	-
+Bsu36I	CCTNAGG	2	5			NR	-	-	-	c	-
+BsuI	GTATCC	12	11			I	-	?	c	-	-
+BsuRI	GGCC	2	2			BIV	-	c	c	-	-
+BtgI	CCRYGG	1	5			N	-	-	c	-	-
+BtgZI	GCGATG	16	20			N	-	-	i	b	-
+BtrI	CACGTC	3	3			I	-	-	v	v	c
+BtsCI	GGATG	7	5			N	-	c	c	b	-
+BtsI	GCAGTG	8	6			N	-	-	c	v	c
+BtsIMutI	CAGTG	7	5			N	-	-	-	?	?
+BtuMI	TCGCGA	3	3			V	?	-	?	-	-
+BveI	ACCTGC	10	14			B	-	-	i	?	?
+Cac8I	GCNNGC	3	3			N	-	-	v	-	-
+CaiI	CAGNNNCTG	6	3			B	-	b	-	b	-
+CciI	TCATGA	1	5			I	?	-	-	?	-
+CciNI	GCGGCCGC	2	6			IV	-	-	?	-	-
+CelII	GCTNAGC	2	5			V	-	-	?	?	-
+CfoI	GCGC	3	1			R	-	-	b	-	-
+Cfr10I	RCCGGY	1	5			BV	-	-	b	?	?
+Cfr13I	GGNCC	1	4			BV	-	b	b	-	-
+Cfr42I	CCGCGG	4	2			BV	-	-	b	-	-
+Cfr9I	CCCGGG	1	5			B	-	-	i	-	-
+ClaI	ATCGAT	2	4			NQRSVX	b	-	b	v	-
+CpoI	CGGWCCG	2	5			B	-	-	b	-	-
+CseI	GACGC	10	15			B	-	-	b	b	-
+Csp45I	TTCGAA	2	4			R	-	-	?	-	?
+Csp6I	GTAC	1	3			B	-	-	c	-	-
+CspCI	CAANNNNNGTGG	-11	-13	24	22	N	-	-	c	-	-
+CspI	CGGWCCG	2	5			R	-	-	b	-	-
+CviJI	RGCY	2	2			QX	-	?	?	?	-
+CviKI-1	RGCY	2	2			N	-	c	c	v	-
+CviQI	GTAC	1	3			N	-	-	i	-	-
+DdeI	CTNAG	1	4			NQRVX	-	-	-	b	-
+DinI	GGCGCC	3	3			V	-	?	?	-	-
+DpnI	GATC	2	2			BENOQRSX	r	-	v	v	-
+DpnII	GATC	0	4			NS	b	-	?	?	-
+DraI	TTTAAA	3	3			BIJNQRSVX	-	-	-	-	b
+DraIII	CACNNNGTG	6	3			INV	-	-	i	v	i
+DrdI	GACNNNNNNGTC	7	5			N	-	-	v	-	-
+DriI	GACNNNNNGTC	6	5			I	-	-	?	-	-
+DsaI	CCRYGG	1	5			V	-	-	?	-	-
+DseDI	GACNNNNNNGTC	7	5			IV	-	-	?	-	-
+EaeI	YGGCCR	1	5			N	-	b	b	-	-
+EagI	CGGCCG	1	5			NSV	-	-	b	-	-
+Eam1104I	CTCTTC	7	10			B	-	-	c	?	-
+Eam1105I	GACNNNNNGTC	6	5			BV	-	-	c	-	-
+EarI	CTCTTC	7	10			NV	-	-	i	b	-
+EciI	GGCGGA	17	15			N	b	c	v	-	-
+Ecl136II	GAGCTC	3	3			B	-	-	v	?	-
+EclHKI	GACNNNNNGTC	6	5			R	-	-	?	-	-
+Eco105I	TACGTA	3	3			B	-	-	b	-	-
+Eco130I	CCWWGG	1	5			B	-	-	-	-	-
+Eco147I	AGGCCT	3	3			B	-	b	-	b	-
+Eco24I	GRGCYC	5	1			B	-	c	c	?	-
+Eco31I	GGTCTC	7	11			BV	-	i	i	?	-
+Eco32I	GATATC	3	3			B	-	-	c	?	-
+Eco47I	GGWCC	1	4			B	-	b	b	-	-
+Eco47III	AGCGCT	3	3			BRS	-	-	b	b	-
+Eco52I	CGGCCG	1	5			B	-	-	b	-	-
+Eco53kI	GAGCTC	3	3			N	-	-	v	c	-
+Eco57I	CTGAAG	22	20			B	-	-	-	?	-
+Eco72I	CACGTG	3	3			B	-	-	b	?	?
+Eco81I	CCTNAGG	2	5			B	-	-	-	?	-
+Eco88I	CYCGRG	1	5			B	-	-	i	-	-
+Eco91I	GGTNACC	1	6			B	-	c	c	?	?
+EcoICRI	GAGCTC	3	3			IRV	-	-	?	?	-
+EcoNI	CCTNNNNNAGG	5	6			NV	-	c	-	v	-
+EcoO109I	RGGNCCY	2	5			BJN	-	v	c	c	-
+EcoRI	GAATTC	1	5			BIJNQRSVX	-	-	v	v	-
+EcoRII	CCWGG	0	5			BJSV	-	b	-	-	-
+EcoRV	GATATC	3	3			IJNQRSVX	-	-	i	v	-
+EcoT38I	GRGCYC	5	1			J	-	?	?	?	-
+EgeI	GGCGCC	3	3			IV	-	?	?	-	-
+EheI	GGCGCC	3	3			B	-	c	v	-	-
+ErhI	CCWWGG	1	5			I	-	-	-	-	-
+Esp3I	CGTCTC	7	11			BNS	-	-	v	c	-
+FaeI	CATG	4	0			I	-	-	-	?	-
+FaiI	YATR	2	2			I	-	-	-	?	-
+FalI	AAGNNNNNCTT	-8	-13	24	19	I	-	-	-	-	-
+FaqI	GGGAC	15	19			B	-	c	v	-	-
+FatI	CATG	0	4			IN	-	-	-	c	-
+FauI	CCCGC	9	11			IN	-	-	v	-	-
+FauNDI	CATATG	2	4			IV	-	-	-	?	-
+FblI	GTMKAC	2	4			I	-	-	?	-	-
+Fnu4HI	GCNGC	2	3			N	-	-	b	-	-
+FokI	GGATG	14	18			IJNVX	-	i	i	i	-
+FriOI	GRGCYC	5	1			IV	-	c	c	b	-
+FseI	GGCCGGCC	6	2			N	-	i	v	-	-
+Fsp4HI	GCNGC	2	3			I	-	-	b	-	-
+FspAI	RTGCGCAY	4	4			B	-	-	b	?	?
+FspBI	CTAG	1	3			B	-	-	-	-	-
+FspI	TGCGCA	3	3			JNS	-	-	b	-	c
+GlaI	GCGC	2	2			I	-	-	?	-	-
+GluI	GCNGC	2	3			I	-	-	?	-	-
+GsaI	CCCAGC	5	1			I	-	-	b	-	-
+GsuI	CTGGAG	22	20			B	-	b	-	-	-
+HaeII	RGCGCY	5	1			JNRV	-	c	v	c	-
+HaeIII	GGCC	2	2			IJNQRVX	-	i	i	-	-
+HgaI	GACGC	10	15			IN	-	-	v	b	-
+HhaI	GCGC	3	1			BJNQRVX	-	-	v	-	-
+Hin1I	GRCGYC	2	4			BV	-	i	v	?	-
+Hin1II	CATG	4	0			B	-	-	-	?	-
+Hin6I	GCGC	1	3			B	-	-	b	-	-
+HincII	GTYRAC	3	3			BJNQRVX	-	-	v	b	b
+HindII	GTYRAC	3	3			I	-	-	b	?	b
+HindIII	AAGCTT	1	5			BIJNQRSVX	-	-	-	v	-
+HinfI	GANTC	1	4			BIJNQRSVX	-	-	v	b	-
+HinP1I	GCGC	1	3			N	-	-	v	-	-
+HpaI	GTTAAC	3	3			IJNQRSVX	-	-	v	-	v
+HpaII	CCGG	1	3			BINQRSVX	-	-	b	-	-
+HphI	GGTGA	13	12			BNV	b	c	c	b	-
+Hpy166II	GTNNAC	3	3			N	-	-	v	b	b
+Hpy188I	TCNGA	3	2			N	b	-	c	b	-
+Hpy188III	TCNNGA	2	4			N	b	-	b	b	-
+Hpy8I	GTNNAC	3	3			B	-	-	i	?	b
+Hpy99I	CGWCG	5	0			N	-	-	v	-	-
+HpyAV	CCTTC	11	10			N	-	-	i	b	-
+HpyCH4III	ACNGT	3	2			N	-	-	c	c	c
+HpyCH4IV	ACGT	1	3			N	-	-	b	c	c
+HpyCH4V	TGCA	2	2			N	-	-	-	-	i
+HpyF10VI	GCNNNNNNNGC	7	4			B	-	-	v	-	-
+HpyF3I	CTNAG	1	4			B	-	-	-	?	-
+HpySE526I	ACGT	1	3			I	-	-	b	?	?
+Hsp92I	GRCGYC	2	4			R	-	?	?	?	-
+Hsp92II	CATG	4	0			R	-	-	-	?	-
+HspAI	GCGC	1	3			IV	-	-	c	-	-
+KasI	GGCGCC	1	5			N	-	c	v	-	-
+Kpn2I	TCCGGA	1	5			B	c	-	b	-	-
+KpnI	GGTACC	5	1			BIJNQRSVX	-	c	c	-	-
+KroI	GCCGGC	1	5			I	-	-	?	-	-
+KroNI	GCCGGC	3	3			I	-	-	?	-	-
+Ksp22I	TGATCA	1	5			IV	b	-	-	b	-
+KspAI	GTTAAC	3	3			BV	-	-	v	-	b
+KspI	CCGCGG	4	2			S	-	-	?	-	-
+Kzo9I	GATC	0	4			IV	c	-	?	c	-
+LguI	GCTCTTC	8	11			B	-	-	c	?	-
+LmnI	GCTCC	6	4			I	-	?	?	-	-
+Lsp1109I	GCAGC	13	17			B	-	-	?	?	-
+LweI	GCATC	10	14			B	-	-	i	b	-
+MabI	ACCWGGT	1	6			I	-	c	-	?	?
+MalI	GATC	2	2			I	r	-	?	?	-
+MamI	GATNNNNATC	5	5			V	b	-	?	b	-
+MauBI	CGCGCGCG	2	6			B	-	-	?	-	-
+MbiI	CCGCTC	3	3			BV	-	-	v	c	-
+MboI	GATC	0	4			BNQRVX	b	-	i	v	-
+MboII	GAAGA	13	12			BIJNQRVX	b	-	c	c	-
+MfeI	CAATTG	1	5			IN	-	-	-	b	-
+MhlI	GDGCHC	5	1			IV	-	c	c	b	?
+MlsI	TGGCCA	3	3			BV	-	b	-	-	-
+MluCI	AATT	0	4			N	-	-	-	v	-
+MluI	ACGCGT	1	5			BIJNQRSVX	-	-	b	v	v
+Mly113I	GGCGCC	2	4			I	-	?	?	-	-
+MlyI	GAGTC	10	10			N	-	-	c	v	-
+MmeI	TCCRAC	26	24			N	c	-	v	-	b
+MnlI	CCTC	11	10			BINQSVX	-	-	c	b	-
+Mox20I	TGGCCA	3	3			I	-	?	-	-	-
+Mph1103I	ATGCAT	5	1			B	-	-	-	?	-
+MreI	CGCCGGCG	2	6			B	-	-	?	-	-
+MroI	TCCGGA	1	5			V	c	-	b	-	-
+MroNI	GCCGGC	1	5			IV	-	-	?	-	-
+MroXI	GAANNNNTTC	5	5			IV	-	-	c	?	c
+MscI	TGGCCA	3	3			N	-	b	-	-	-
+MseI	TTAA	1	3			NV	-	-	-	-	v
+MslI	CAYNNNNRTG	5	5			N	-	-	c	v	b
+Msp20I	TGGCCA	3	3			V	-	?	-	-	-
+MspA1I	CMGCKG	3	3			INRV	-	-	?	?	-
+MspI	CCGG	1	3			BIJNQRSVX	-	-	i	-	-
+MspJI	CNNR	13	17			N	?	?	?	?	?
+MspR9I	CCNGG	2	3			I	-	b	?	-	-
+MssI	GTTTAAAC	4	4			B	-	-	c	-	b
+MteI	GCGCNGCGC	4	5			I	-	-	?	-	-
+MunI	CAATTG	1	5			B	-	-	-	?	-
+Mva1269I	GAATGC	7	5			B	-	-	c	?	-
+MvaI	CCWGG	2	3			B	-	c	-	-	-
+MwoI	GCNNNNNNNGC	7	4			N	-	-	v	-	-
+NaeI	GCCGGC	3	3			NR	-	-	v	-	-
+NarI	GGCGCC	2	4			JNQRVX	-	c	v	-	-
+NciI	CCSGG	2	3			JNRV	-	-	v	-	-
+NcoI	CCATGG	1	5			BJNQRSVX	-	-	-	-	-
+NdeI	CATATG	2	4			BJNQRSVX	-	-	-	c	-
+NdeII	GATC	0	4			JR	b	-	c	b	-
+NgoMIV	GCCGGC	1	5			N	-	-	v	-	-
+NheI	GCTAGC	1	5			BJNQRVX	-	-	v	-	-
+NlaIII	CATG	4	0			N	-	-	-	b	-
+NlaIV	GGNNCC	3	3			NV	-	b	b	-	-
+NmeAIII	GCCGAG	27	25			N	-	-	c	-	-
+NmuCI	GTSAC	0	5			B	-	-	i	?	-
+NotI	GCGGCCGC	2	6			BJNQRSVX	-	-	v	-	-
+NruI	TCGCGA	3	3			IJNQRSVX	b	-	b	-	-
+NsbI	TGCGCA	3	3			B	-	-	b	-	c
+NsiI	ATGCAT	5	1			JNQRSVX	-	-	-	i	-
+NspI	RCATGY	5	1			NV	-	-	c	v	c
+NspV	TTCGAA	2	4			J	-	-	b	-	?
+OliI	CACNNNNGTG	5	5			B	-	-	i	b	b
+PacI	TTAATTAA	5	3			BNS	-	-	-	-	c
+PaeI	GCATGC	5	1			B	-	-	c	b	-
+PaeR7I	CTCGAG	1	5			NV	-	-	v	-	-
+PagI	TCATGA	1	5			B	i	-	-	i	-
+PalAI	GGCGCGCC	2	6			I	-	?	?	-	-
+PaqCI	CACCTGC	11	15			N	-	-	i	?	?
+PasI	CCCWGGG	2	5			B	-	c	-	-	-
+PauI	GCGCGC	1	5			B	-	-	b	-	-
+PceI	AGGCCT	3	3			IV	-	?	-	?	-
+PciI	ACATGT	1	5			IN	-	-	-	v	v
+PciSI	GCTCTTC	8	11			I	-	-	?	?	-
+PcsI	WCGNNNNNNNCGW	7	6			I	?	-	?	-	-
+PctI	GAATGC	7	5			I	-	-	c	?	-
+PdiI	GCCGGC	3	3			B	-	-	b	-	-
+PdmI	GAANNNNTTC	5	5			B	-	-	v	?	?
+PfeI	GAWTC	1	4			B	-	-	b	b	-
+Pfl23II	CGTACG	1	5			B	-	-	b	-	-
+PflFI	GACNNNGTC	4	5			NV	-	-	c	b	-
+PflMI	CCANNNNNTGG	7	4			NV	-	b	-	-	-
+PfoI	TCCNGGA	1	6			B	i	b	b	-	-
+PinAI	ACCGGT	1	5			QVX	-	-	?	?	?
+PkrI	GCNGC	3	2			I	-	-	?	-	-
+Ple19I	CGATCG	4	2			I	c	-	?	-	-
+PleI	GAGTC	9	10			N	-	-	v	b	-
+PluTI	GGCGCC	5	1			N	-	c	v	-	-
+PmeI	GTTTAAAC	4	4			NS	-	-	c	-	v
+PmlI	CACGTG	3	3			NV	-	-	b	v	v
+PpsI	GAGTC	9	10			I	-	-	?	?	-
+Ppu21I	YACGTR	3	3			B	-	-	b	?	?
+PpuMI	RGGWCCY	2	5			N	-	v	c	c	-
+PscI	ACATGT	1	5			B	-	-	-	?	?
+PshAI	GACNNNNGTC	5	5			NV	-	-	v	b	-
+PsiI	TTATAA	3	3			IN	-	-	-	-	b
+Psp124BI	GAGCTC	5	1			IV	-	-	?	?	-
+Psp1406I	AACGTT	2	4			B	-	-	b	?	?
+Psp5II	RGGWCCY	2	5			B	-	b	?	?	-
+Psp6I	CCWGG	0	5			I	-	?	-	-	-
+PspCI	CACGTG	3	3			IV	-	-	?	?	?
+PspEI	GGTNACC	1	6			IV	-	?	?	?	?
+PspGI	CCWGG	0	5			NS	-	b	-	-	-
+PspLI	CGTACG	1	5			I	-	-	?	-	-
+PspN4I	GGNNCC	3	3			I	-	i	i	-	-
+PspOMI	GGGCCC	1	5			INV	-	b	b	-	-
+PspPPI	RGGWCCY	2	5			I	-	?	?	?	-
+PspXI	VCTCGAGB	2	6			IN	-	-	i	c	c
+PsrI	GAACNNNNNNTAC	-7	-12	25	20	I	-	-	i	-	-
+PstI	CTGCAG	5	1			BIJNQRSVX	-	-	-	-	-
+PstNI	CAGNNNCTG	6	3			I	-	?	-	b	-
+PsuI	RGATCY	1	5			B	c	c	c	?	-
+PsyI	GACNNNGTC	4	5			B	-	-	c	?	-
+PvuI	CGATCG	4	2			BNQRX	c	-	b	-	-
+PvuII	CAGCTG	3	3			BIJNQRSVX	-	-	-	v	-
+RgaI	GCGATCGC	5	3			I	?	-	?	-	-
+RigI	GGCCGGCC	6	2			I	-	?	b	-	-
+RsaI	GTAC	2	2			BIJNQRVX	-	-	v	-	-
+RsaNI	GTAC	1	3			I	-	-	c	-	-
+RseI	CAYNNNNRTG	5	5			B	-	-	?	?	?
+Rsr2I	CGGWCCG	2	5			IV	-	-	?	-	-
+RsrII	CGGWCCG	2	5			NQX	-	-	b	-	-
+SacI	GAGCTC	5	1			BJNQRSVX	-	-	c	c	-
+SacII	CCGCGG	4	2			JNQRSVX	-	-	b	-	-
+SalI	GTCGAC	1	5			BIJNQRSVX	-	-	v	-	-
+SapI	GCTCTTC	8	11			N	-	-	c	b	-
+SatI	GCNGC	2	3			B	-	-	b	-	-
+Sau3AI	GATC	0	4			JNRVX	c	-	v	i	-
+Sau96I	GGNCC	1	4			JNV	-	b	b	-	-
+SbfI	CCTGCAGG	6	2			INSV	-	-	-	-	-
+ScaI	AGTACT	3	3			BJNQRVX	-	-	-	b	-
+SchI	GAGTC	10	10			B	-	-	c	b	-
+ScrFI	CCNGG	2	3			JNVX	-	b	b	-	-
+SdaI	CCTGCAGG	6	2			BV	-	-	-	-	-
+SduI	GDGCHC	5	1			B	-	c	c	?	?
+SetI	ASST	4	0			I	-	?	?	?	?
+SexAI	ACCWGGT	1	6			N	-	b	-	c	c
+SfaAI	GCGATCGC	5	3			B	?	-	?	-	-
+SfaNI	GCATC	10	14			INV	-	-	i	b	-
+SfcI	CTRYAG	1	5			N	-	-	-	-	-
+SfiI	GGCCNNNNNGGCC	8	5			BIJNQRSVX	-	i	v	-	-
+SfoI	GGCGCC	3	3			NV	-	v	v	-	-
+Sfr274I	CTCGAG	1	5			IV	-	-	?	-	-
+Sfr303I	CCGCGG	4	2			IV	-	-	?	-	-
+SfuI	TTCGAA	2	4			V	-	-	c	-	?
+SgeI	CNNG	13	17			B	-	?	?	-	-
+SgfI	GCGATCGC	5	3			R	c	-	b	-	-
+SgrAI	CRCCGGYG	2	6			N	-	-	v	v	v
+SgrDI	CGTCGACG	2	6			B	-	-	?	-	-
+SgsI	GGCGCGCC	2	6			B	-	c	v	-	-
+SinI	GGWCC	1	4			R	-	?	?	-	-
+SmaI	CCCGGG	3	3			BIJNQRSVX	-	-	b	-	-
+SmiI	ATTTAAAT	4	4			BIV	-	-	-	?	-
+SmiMI	CAYNNNNRTG	5	5			IV	-	-	?	?	?
+SmlI	CTYRAG	1	5			N	-	-	c	i	-
+SmoI	CTYRAG	1	5			B	-	-	c	?	-
+SnaBI	TACGTA	3	3			NR	-	-	b	-	-
+SpeI	ACTAGT	1	5			JNQRVX	-	-	-	b	b
+SphI	GCATGC	5	1			IJNQRSVX	-	-	c	b	-
+SrfI	GCCCGGGC	4	4			N	-	-	v	-	-
+Sse9I	AATT	0	4			IV	-	-	-	?	-
+SsiI	CCGC	1	3			B	-	-	b	-	-
+SspDI	GGCGCC	1	5			B	-	?	?	-	-
+SspI	AATATT	3	3			BIJNQRSVX	-	-	-	c	-
+SspMI	CTAG	1	3			I	-	-	-	-	-
+StuI	AGGCCT	3	3			JNQRSX	-	b	-	c	-
+StyD4I	CCNGG	0	5			N	-	b	i	-	-
+StyI	CCWWGG	1	5			JNR	-	-	-	-	-
+SwaI	ATTTAAAT	4	4			JN	-	-	-	c	-
+TaaI	ACNGT	3	2			B	-	-	i	?	?
+TaiI	ACGT	4	0			B	-	-	b	b	b
+TaqI	TCGA	1	3			BIJNQRVX	b	-	c	-	-
+TaqII	GACCGA	17	15			QX	?	-	?	b	-
+TasI	AATT	0	4			BV	-	-	-	b	-
+TatI	WGTACW	1	5			B	-	-	-	?	-
+TauI	GCSGC	4	1			B	-	-	b	-	-
+TfiI	GAWTC	1	4			N	-	-	v	b	-
+Tru1I	TTAA	1	3			B	-	-	-	-	b
+Tru9I	TTAA	1	3			IRV	-	-	-	-	b
+TscAI	CASTG	7	-2			B	-	-	-	?	?
+TseFI	GTSAC	0	5			I	-	-	?	?	-
+TseI	GCWGC	1	4			N	-	-	v	c	-
+Tsp45I	GTSAC	0	5			N	-	-	c	b	-
+TspDTI	ATGAA	16	14			QX	-	-	-	?	?
+TspGWI	ACGGA	16	14			QX	?	-	?	?	?
+TspMI	CCCGGG	1	5			N	-	-	b	-	-
+TspRI	CASTG	7	-2			N	-	-	-	c	c
+Tth111I	GACNNNGTC	4	5			INQRVX	-	-	c	b	-
+Van91I	CCANNNNNTGG	7	4			BV	-	b	-	-	-
+Vha464I	CTTAAG	1	5			V	-	-	-	-	-
+VneI	GTGCAC	1	5			IV	-	-	b	-	?
+VspI	ATTAAT	2	4			BIRV	-	-	-	c	-
+XagI	CCTNNNNNAGG	5	6			BV	-	?	-	?	-
+XapI	RAATTY	1	5			BV	-	-	c	b	-
+XbaI	TCTAGA	1	5			BIJMNQRSVX	b	-	-	-	-
+XceI	RCATGY	5	1			BV	-	-	c	?	?
+XcmI	CCANNNNNNNNNTGG	8	7			N	-	c	-	-	-
+XhoI	CTCGAG	1	5			BJNQRVX	-	-	i	-	-
+XhoII	RGATCY	1	5			RV	c	?	?	?	-
+XmaCI	CCCGGG	1	5			V	-	-	?	-	-
+XmaI	CCCGGG	1	5			INRV	-	-	i	-	-
+XmaJI	CCTAGG	1	5			BV	-	-	-	-	-
+XmiI	GTMKAC	2	4			BV	-	-	b	-	-
+XmnI	GAANNNNTTC	5	5			NRV	-	-	v	b	c
+ZraI	GACGTC	3	3			INV	-	-	v	v	-
+ZrmI	AGTACT	3	3			IV	-	-	-	b	-
+Zsp2I	ATGCAT	5	1			V	-	-	-	?	-

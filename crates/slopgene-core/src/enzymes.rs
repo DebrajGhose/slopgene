@@ -9,7 +9,7 @@
 
 use crate::alphabet::{self, iupac_matches};
 use crate::error::{Error, Result};
-use crate::model::Strand;
+use crate::model::{Document, Methylation, Strand};
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
@@ -34,6 +34,195 @@ pub const SUPPLIERS: &[(char, &str)] = &[
     ('X', "EURx"),
 ];
 
+/// A methylase whose work can stop a restriction enzyme from cutting. The first three are the
+/// ones a document's [`Methylation`] records, as E. coli strains carry them. CpG and EcoBI
+/// methylation are kept for the enzyme information only, so the table says what REBASE knows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Methylase {
+    Dam,
+    Dcm,
+    EcoKI,
+    CpG,
+    EcoBI,
+}
+
+impl Methylase {
+    /// Every methylase, in the order the enzyme table lists them.
+    pub const ALL: [Methylase; 5] = [Methylase::Dam, Methylase::Dcm, Methylase::CpG, Methylase::EcoBI, Methylase::EcoKI];
+    /// The methylases a document's [`Methylation`] can switch on, in the order they are checked.
+    pub const OF_HOST: [Methylase; 3] = [Methylase::Dam, Methylase::Dcm, Methylase::EcoKI];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Methylase::Dam => "Dam",
+            Methylase::Dcm => "Dcm",
+            Methylase::EcoKI => "EcoKI",
+            Methylase::CpG => "CpG",
+            Methylase::EcoBI => "EcoBI",
+        }
+    }
+
+    /// The motif the methylase recognises, 5'->3' on the top strand in IUPAC code, with the
+    /// index of each base it methylates on the top strand and the top-strand index opposite each
+    /// base it methylates on the bottom strand. Dam methylates the adenine of GATC on both
+    /// strands, Dcm the inner cytosine of CCWGG on both strands, and the Type I enzymes EcoKI and
+    /// EcoBI one adenine in each half of their split sites.
+    pub fn motif(self) -> (&'static [u8], &'static [usize], &'static [usize]) {
+        match self {
+            Methylase::Dam => (b"GATC", &[1], &[2]),
+            Methylase::Dcm => (b"CCWGG", &[1], &[3]),
+            Methylase::CpG => (b"CG", &[0], &[1]),
+            Methylase::EcoKI => (b"AACNNNNNNGTGC", &[1], &[10]),
+            Methylase::EcoBI => (b"TGANNNNNNNNTGCT", &[2], &[11]),
+        }
+    }
+
+    /// Whether a document's methylation state switches this methylase on.
+    pub fn active(self, methylation: Methylation) -> bool {
+        match self {
+            Methylase::Dam => methylation.dam,
+            Methylase::Dcm => methylation.dcm,
+            Methylase::EcoKI => methylation.ecoki,
+            Methylase::CpG | Methylase::EcoBI => false,
+        }
+    }
+}
+
+/// What a methylase does to an enzyme when a base it has methylated lies in the recognition
+/// site, as REBASE reports it from the published tests.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum Effect {
+    /// REBASE has no data.
+    #[default]
+    Unknown,
+    /// The methylase's motif can never put a methylated base inside the site.
+    NoOverlap,
+    /// The enzyme cuts the methylated site as it cuts an unmethylated one.
+    Cut,
+    /// The enzyme does not cut the methylated site.
+    Blocked,
+    /// The enzyme cuts the methylated site slowly or only in part.
+    Impaired,
+    /// Some methylated sites are cut and others are not.
+    Variable,
+    /// The enzyme cuts only methylated sites.
+    Required,
+}
+
+impl Effect {
+    /// The one-letter code of the enzyme table.
+    pub fn code(self) -> char {
+        match self {
+            Effect::Unknown => '?',
+            Effect::NoOverlap => '-',
+            Effect::Cut => 'c',
+            Effect::Blocked => 'b',
+            Effect::Impaired => 'i',
+            Effect::Variable => 'v',
+            Effect::Required => 'r',
+        }
+    }
+
+    pub fn from_code(code: char) -> Option<Effect> {
+        Some(match code {
+            '?' => Effect::Unknown,
+            '-' => Effect::NoOverlap,
+            'c' => Effect::Cut,
+            'b' => Effect::Blocked,
+            'i' => Effect::Impaired,
+            'v' => Effect::Variable,
+            'r' => Effect::Required,
+            _ => return None,
+        })
+    }
+
+    /// The name used in JSON.
+    pub fn name(self) -> &'static str {
+        match self {
+            Effect::Unknown => "unknown",
+            Effect::NoOverlap => "no_overlap",
+            Effect::Cut => "cut",
+            Effect::Blocked => "blocked",
+            Effect::Impaired => "impaired",
+            Effect::Variable => "variable",
+            Effect::Required => "required",
+        }
+    }
+
+    /// The effect in words, for a line such as "Dam: blocked".
+    pub fn describe(self) -> &'static str {
+        match self {
+            Effect::Unknown => "unknown",
+            Effect::NoOverlap => "cannot overlap the site",
+            Effect::Cut => "no effect",
+            Effect::Blocked => "blocked",
+            Effect::Impaired => "impaired",
+            Effect::Variable => "varies between sites",
+            Effect::Required => "required for cutting",
+        }
+    }
+}
+
+/// An enzyme's response to each methylase (see [`Methylase::ALL`] for the order).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub struct Sensitivity {
+    pub dam: Effect,
+    pub dcm: Effect,
+    pub cpg: Effect,
+    pub ecobi: Effect,
+    pub ecoki: Effect,
+}
+
+impl Sensitivity {
+    pub fn get(self, methylase: Methylase) -> Effect {
+        match methylase {
+            Methylase::Dam => self.dam,
+            Methylase::Dcm => self.dcm,
+            Methylase::CpG => self.cpg,
+            Methylase::EcoBI => self.ecobi,
+            Methylase::EcoKI => self.ecoki,
+        }
+    }
+
+    pub fn set(&mut self, methylase: Methylase, effect: Effect) {
+        match methylase {
+            Methylase::Dam => self.dam = effect,
+            Methylase::Dcm => self.dcm = effect,
+            Methylase::CpG => self.cpg = effect,
+            Methylase::EcoBI => self.ecobi = effect,
+            Methylase::EcoKI => self.ecoki = effect,
+        }
+    }
+
+    /// The five codes in the table's order: Dam, Dcm, CpG, EcoBI, EcoKI.
+    pub fn codes(self) -> Vec<char> {
+        Methylase::ALL.iter().map(|&m| self.get(m).code()).collect()
+    }
+
+    /// Read the five code columns of a table row. A missing or empty column is unknown.
+    pub fn from_fields(fields: &[&str]) -> Option<Sensitivity> {
+        let mut out = Sensitivity::default();
+        for (ii, m) in Methylase::ALL.iter().enumerate() {
+            let text = fields.get(ii).map(|f| f.trim()).unwrap_or("");
+            if text.is_empty() {
+                continue;
+            }
+            let mut chars = text.chars();
+            let effect = Effect::from_code(chars.next()?)?;
+            if chars.next().is_some() {
+                return None;
+            }
+            out.set(*m, effect);
+        }
+        Some(out)
+    }
+
+    /// Whether any methylase blocks, impairs or is needed by the enzyme.
+    pub fn matters(self) -> bool {
+        Methylase::ALL.iter().any(|&m| matches!(self.get(m), Effect::Blocked | Effect::Impaired | Effect::Variable | Effect::Required))
+    }
+}
+
 /// One restriction enzyme.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Enzyme {
@@ -44,6 +233,8 @@ pub struct Enzyme {
     pub cuts: Vec<(i32, i32)>,
     /// REBASE supplier codes (see [`SUPPLIERS`]).
     pub suppliers: String,
+    /// What Dam, Dcm, CpG, EcoBI and EcoKI methylation do to the enzyme.
+    pub sensitivity: Sensitivity,
 }
 
 /// How a cut leaves the ends.
@@ -176,6 +367,8 @@ impl EnzymeDb {
                 site: fields[1].trim().to_ascii_uppercase().into_bytes(),
                 cuts,
                 suppliers: fields.get(6).map(|s| s.trim().to_string()).unwrap_or_default(),
+                sensitivity: Sensitivity::from_fields(fields.get(7..).unwrap_or(&[]))
+                    .ok_or_else(|| Error::Parse(format!("enzyme table line {}: bad methylation code", ii + 1)))?,
             });
         }
         Ok(EnzymeDb::from_enzymes(enzymes, source))
@@ -188,12 +381,18 @@ impl EnzymeDb {
         out.push_str("# REBASE, the Restriction Enzyme Database, http://rebase.neb.com (Roberts RJ, Vincze T, Posfai J, Macelis D. Nucleic Acids Res.)\n");
         out.push_str("# Cut positions are boundaries counted from the first base of the site (0 = just before it,\n");
         out.push_str("# negative = upstream), on the top strand (top) and bottom strand (bottom), in top-strand coordinates.\n");
-        out.push_str("# Regenerate with: slopgene enzymes import-rebase --emboss-e link_emboss_e --emboss-r link_emboss_r\n");
-        out.push_str("name\tsite\ttop1\tbottom1\ttop2\tbottom2\tsuppliers\n");
+        out.push_str("# The last five columns say what Dam, Dcm, CpG, EcoBI and EcoKI methylation do to the enzyme when a\n");
+        out.push_str("# methylated base lies in its site, from REBASE's methylation sensitivity pages: c = cut as usual,\n");
+        out.push_str("# b = blocked, i = impaired, v = varies between sites, r = required for cutting, - = the methylase's\n");
+        out.push_str("# motif cannot overlap the site, ? = no data.\n");
+        out.push_str("# Regenerate with: slopgene enzymes import-rebase --emboss-e link_emboss_e --emboss-r link_emboss_r,\n");
+        out.push_str("# and scripts/rebase-methylation.py for the methylation columns.\n");
+        out.push_str("name\tsite\ttop1\tbottom1\ttop2\tbottom2\tsuppliers\tdam\tdcm\tcpg\tecobi\tecoki\n");
         for e in &self.enzymes {
             let (t1, b1) = e.cuts[0];
             let (t2, b2) = e.cuts.get(1).map(|&(t, b)| (t.to_string(), b.to_string())).unwrap_or_default();
-            out.push_str(&format!("{}\t{}\t{t1}\t{b1}\t{t2}\t{b2}\t{}\n", e.name, e.site_str(), e.suppliers));
+            let codes: Vec<String> = e.sensitivity.codes().iter().map(|c| c.to_string()).collect();
+            out.push_str(&format!("{}\t{}\t{t1}\t{b1}\t{t2}\t{b2}\t{}\t{}\n", e.name, e.site_str(), e.suppliers, codes.join("\t")));
         }
         out
     }
@@ -251,7 +450,7 @@ impl EnzymeDb {
             .into_iter()
             .filter_map(|(name, site, cuts)| {
                 let sup = suppliers.get(&name).cloned().unwrap_or_default();
-                (!sup.is_empty()).then_some(Enzyme { name, site, cuts, suppliers: sup })
+                (!sup.is_empty()).then_some(Enzyme { name, site, cuts, suppliers: sup, sensitivity: Sensitivity::default() })
             })
             .collect();
         enzymes.sort_by_key(|e| e.name.to_ascii_lowercase());
@@ -259,6 +458,16 @@ impl EnzymeDb {
             return Err(Error::Parse("no commercially available enzymes found in the REBASE files".into()));
         }
         Ok(EnzymeDb::from_enzymes(enzymes, version))
+    }
+
+    /// Give every enzyme that `other` also lists its methylation sensitivity from there. The
+    /// REBASE EMBOSS files carry no sensitivity data, so a fresh import takes the built-in table's.
+    pub fn keep_sensitivity_of(&mut self, other: &EnzymeDb) {
+        for e in &mut self.enzymes {
+            if let Some(known) = other.get(&e.name) {
+                e.sensitivity = known.sensitivity;
+            }
+        }
     }
 
     pub fn len(&self) -> usize {
@@ -394,6 +603,26 @@ pub struct Cut {
     pub overhang: i32,
 }
 
+/// Why a site does not cut, or cuts badly: the methylase at work and the enzyme's response.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Block {
+    pub methylase: Methylase,
+    pub effect: Effect,
+}
+
+impl Block {
+    /// The block in words, such as "blocked by Dam methylation".
+    pub fn describe(&self) -> String {
+        let name = self.methylase.name();
+        match self.effect {
+            Effect::Required => format!("not {name}-methylated, which the enzyme needs"),
+            Effect::Impaired => format!("cut slowly: impaired by {name} methylation"),
+            Effect::Variable => format!("may be blocked by {name} methylation"),
+            _ => format!("blocked by {name} methylation"),
+        }
+    }
+}
+
 /// One occurrence of a recognition site.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Site {
@@ -404,8 +633,21 @@ pub struct Site {
     /// `Forward` when the site reads 5'->3' on the top strand, `Reverse` for the other
     /// orientation of a non-palindromic site.
     pub strand: Strand,
-    /// The cuts this occurrence makes. Empty when the cut would fall outside a linear sequence.
+    /// The cuts this occurrence makes. Empty when the cut would fall outside a linear sequence,
+    /// and when methylation stops it (see `blocked`).
     pub cuts: Vec<Cut>,
+    /// Why methylation stops the cut, when it does. The cuts the enzyme would make on
+    /// unmethylated DNA are then in `blocked_cuts`.
+    pub blocked: Option<Block>,
+    pub blocked_cuts: Vec<Cut>,
+    /// Methylation that impairs the cut or may block it. The site still counts as cutting.
+    pub impaired: Option<Block>,
+}
+
+impl Site {
+    fn new(enzyme: &str, start: usize, len: usize, strand: Strand, cuts: Vec<Cut>) -> Site {
+        Site { enzyme: enzyme.to_string(), start, len, strand, cuts, blocked: None, blocked_cuts: Vec::new(), impaired: None }
+    }
 }
 
 /// Length of the site prefix used to index enzymes for scanning.
@@ -497,7 +739,7 @@ pub fn find_sites(seq: &[u8], circular: bool, enzymes: &[&Enzyme]) -> Vec<Site> 
             return;
         }
         let cuts = probe.enzyme.cuts.iter().filter_map(|&(top, bottom)| place_cut(start, n, top, bottom, probe.strand, seq_len, circular)).collect();
-        sites.push(Site { enzyme: probe.enzyme.name.clone(), start, len: n, strand: probe.strand, cuts });
+        sites.push(Site::new(&probe.enzyme.name, start, n, probe.strand, cuts));
     };
     for start in 0..seq_len {
         let window_fits = circular || start + PREFIX <= seq_len;
@@ -547,7 +789,7 @@ pub fn find_sites_exhaustive(seq: &[u8], circular: bool, enzymes: &[&Enzyme]) ->
                 }
                 let strand = if ii == 0 { Strand::Forward } else { Strand::Reverse };
                 let cuts = enzyme.cuts.iter().filter_map(|&(top, bottom)| place_cut(start, n, top, bottom, strand, seq_len, circular)).collect();
-                sites.push(Site { enzyme: enzyme.name.clone(), start, len: n, strand, cuts });
+                sites.push(Site::new(&enzyme.name, start, n, strand, cuts));
             }
         }
     }
@@ -588,6 +830,134 @@ pub fn cutting_sites_by_enzyme(sites: &[Site]) -> HashMap<&str, Vec<&Site>> {
 /// How many times each enzyme cuts (enzymes that do not cut are included with 0).
 pub fn cut_counts<'a>(seq: &[u8], circular: bool, enzymes: &[&'a Enzyme]) -> Vec<(&'a Enzyme, usize)> {
     let sites = find_sites(seq, circular, enzymes);
+    let groups = cutting_sites_by_enzyme(&sites);
+    enzymes.iter().map(|e| (*e, groups.get(e.name.as_str()).map_or(0, |g| g.len()))).collect()
+}
+
+/// Which bases of `seq` the host's methylases modify, as one byte per base with a bit for each
+/// methylase of [`Methylase::OF_HOST`]: bit 0 Dam, bit 1 Dcm, bit 2 EcoKI. A base counts whether
+/// the methyl group sits on the top strand or on the bottom strand, because a restriction enzyme
+/// reads both. Motifs are found in both orientations and through the origin of a circle.
+pub fn methylated_bases(seq: &[u8], circular: bool, methylation: Methylation) -> Vec<u8> {
+    let len = seq.len();
+    let mut marks = vec![0u8; len];
+    for (ii, methylase) in Methylase::OF_HOST.iter().enumerate() {
+        if !methylase.active(methylation) {
+            continue;
+        }
+        let (motif, top, bottom) = methylase.motif();
+        let n = motif.len();
+        if n > len && !circular || len == 0 {
+            continue;
+        }
+        let reverse = alphabet::revcomp(motif);
+        let palindromic = reverse == motif;
+        let last_start = if circular { len } else { len + 1 - n };
+        let base_at = |pos: usize| seq[pos % len];
+        for start in 0..last_start {
+            // The motif as written: its marks sit at the indices the motif gives.
+            if (0..n).all(|k| iupac_matches(motif[k], base_at(start + k))) {
+                for &t in top.iter().chain(bottom) {
+                    marks[(start + t) % len] |= 1 << ii;
+                }
+            }
+            // The motif on the bottom strand: the marks mirror within the occurrence.
+            if !palindromic && (0..n).all(|k| iupac_matches(reverse[k], base_at(start + k))) {
+                for &t in top.iter().chain(bottom) {
+                    marks[(start + n - 1 - t) % len] |= 1 << ii;
+                }
+            }
+        }
+    }
+    marks
+}
+
+/// [`find_sites`] on DNA in a given methylation state. A site that a methylated base makes
+/// uncuttable keeps its place in the list but loses its cuts (see [`Site::blocked`]), and a site
+/// of an enzyme that cuts only methylated DNA loses them when the DNA is not methylated. A site
+/// whose cut methylation impairs, or may block, keeps its cuts and says so in [`Site::impaired`].
+/// Isoschizomers respond each in their own way, as REBASE records them.
+pub fn find_sites_methylated(seq: &[u8], circular: bool, methylation: Methylation, enzymes: &[&Enzyme]) -> Vec<Site> {
+    let mut sites = find_sites(seq, circular, enzymes);
+    // An enzyme matters when a host methylase blocks it or is needed by it.
+    let matters = |e: &Enzyme| {
+        Methylase::OF_HOST.iter().any(|&m| {
+            let effect = e.sensitivity.get(m);
+            effect == Effect::Required || (m.active(methylation) && matches!(effect, Effect::Blocked | Effect::Impaired | Effect::Variable))
+        })
+    };
+    if !enzymes.iter().any(|e| matters(e)) {
+        return sites;
+    }
+    let marks = methylated_bases(seq, circular, methylation);
+    let len = seq.len();
+    let by_name: HashMap<&str, &Enzyme> = enzymes.iter().map(|e| (e.name.as_str(), *e)).collect();
+    for site in &mut sites {
+        let Some(enzyme) = by_name.get(site.enzyme.as_str()) else { continue };
+        if !matters(enzyme) {
+            continue;
+        }
+        // The methylases with a methylated base inside this occurrence of the site.
+        let touched = (0..site.len).fold(0u8, |acc, k| acc | marks[(site.start + k) % len]);
+        for (ii, &methylase) in Methylase::OF_HOST.iter().enumerate() {
+            let hit = touched & (1 << ii) != 0;
+            let effect = enzyme.sensitivity.get(methylase);
+            let block = Block { methylase, effect };
+            match effect {
+                Effect::Blocked if hit => site.blocked.get_or_insert(block),
+                Effect::Required if !hit => site.blocked.get_or_insert(block),
+                Effect::Impaired | Effect::Variable if hit => site.impaired.get_or_insert(block),
+                _ => continue,
+            };
+        }
+        if site.blocked.is_some() {
+            site.blocked_cuts = std::mem::take(&mut site.cuts);
+        }
+    }
+    sites
+}
+
+/// The sites in a document, with its methylation taken into account.
+pub fn find_sites_in(doc: &Document, enzymes: &[&Enzyme]) -> Vec<Site> {
+    find_sites_methylated(&doc.seq, doc.is_circular(), doc.methylation, enzymes)
+}
+
+/// The sites methylation blocks, grouped by enzyme and reason, with the positions of the cuts
+/// they would have made, counted from 1.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BlockedGroup {
+    pub enzyme: String,
+    pub reason: String,
+    pub positions: Vec<usize>,
+}
+
+impl BlockedGroup {
+    /// The group in a few words, such as "XbaI at 201 (blocked by Dam methylation)".
+    pub fn describe(&self) -> String {
+        let at: Vec<String> = self.positions.iter().map(|p| crate::render::thousands(*p)).collect();
+        format!("{} at {} ({})", self.enzyme, at.join(", "), self.reason)
+    }
+}
+
+/// Group the blocked sites among `sites` by enzyme and reason, in order of first appearance, so
+/// a report can say "DpnI at 206, 1,183, 1,220" once instead of three times.
+pub fn blocked_groups(sites: &[Site]) -> Vec<BlockedGroup> {
+    let mut groups: Vec<BlockedGroup> = Vec::new();
+    for site in sites {
+        let Some(block) = site.blocked else { continue };
+        let at = site.blocked_cuts.first().map_or(site.start + 1, |c| c.pos.max(1));
+        let reason = block.describe();
+        match groups.iter_mut().find(|g| g.enzyme == site.enzyme && g.reason == reason) {
+            Some(group) => group.positions.push(at),
+            None => groups.push(BlockedGroup { enzyme: site.enzyme.clone(), reason, positions: vec![at] }),
+        }
+    }
+    groups
+}
+
+/// How many times each enzyme cuts a document, with its methylation taken into account.
+pub fn cut_counts_in<'a>(doc: &Document, enzymes: &[&'a Enzyme]) -> Vec<(&'a Enzyme, usize)> {
+    let sites = find_sites_in(doc, enzymes);
     let groups = cutting_sites_by_enzyme(&sites);
     enzymes.iter().map(|e| (*e, groups.get(e.name.as_str()).map_or(0, |g| g.len()))).collect()
 }
@@ -692,5 +1062,116 @@ mod tests {
         assert!(db.set("golden-gate").unwrap().iter().any(|e| e.name == "BsaI"));
         assert_eq!(db.set("EcoRI, BamHI").unwrap().len(), 2);
         assert!(db.set("6+").unwrap().iter().all(|e| e.specificity() >= 6));
+    }
+
+    /// An enzyme with the given response to the host's methylases, so the tests hold whatever
+    /// REBASE later says about the real enzymes.
+    fn enzyme_with(name: &str, site: &str, cuts: (i32, i32), dam: Effect, dcm: Effect, ecoki: Effect) -> Enzyme {
+        Enzyme {
+            name: name.into(),
+            site: site.as_bytes().to_vec(),
+            cuts: vec![cuts],
+            suppliers: "N".into(),
+            sensitivity: Sensitivity { dam, dcm, ecoki, ..Sensitivity::default() },
+        }
+    }
+
+    #[test]
+    fn dam_methylation_blocks_a_site_only_where_gatc_overlaps_it() {
+        // XbaI-like: blocked by Dam. TCTAGA at 10 stands alone, TCTAGATC at 30 overlaps GATC.
+        let xbai = enzyme_with("XbaI", "TCTAGA", (1, 5), Effect::Blocked, Effect::NoOverlap, Effect::NoOverlap);
+        let mut seq = vec![b'A'; 60];
+        seq[10..16].copy_from_slice(b"TCTAGA");
+        seq[30..38].copy_from_slice(b"TCTAGATC");
+        let plain = find_sites_methylated(&seq, false, Methylation::NONE, &[&xbai]);
+        assert_eq!(plain.len(), 2);
+        assert!(plain.iter().all(|s| s.blocked.is_none() && s.cuts.len() == 1));
+        let methylated = find_sites_methylated(&seq, false, Methylation::E_COLI, &[&xbai]);
+        assert_eq!(methylated.len(), 2, "a blocked site stays in the list");
+        assert!(methylated[0].blocked.is_none());
+        let blocked = methylated[1].blocked.expect("the overlapping site is blocked");
+        assert_eq!(blocked.methylase, Methylase::Dam);
+        assert!(methylated[1].cuts.is_empty());
+        assert_eq!(methylated[1].blocked_cuts, vec![Cut { pos: 31, overhang: 4 }]);
+        assert_eq!(blocked.describe(), "blocked by Dam methylation");
+        // GATC before the site puts the bottom strand's methylated base inside it.
+        let mut before = vec![b'A'; 40];
+        before[10..18].copy_from_slice(b"GATCTAGA");
+        assert!(find_sites_methylated(&before, false, Methylation::E_COLI, &[&xbai])[0].blocked.is_some());
+        // Without Dam the overlapping site cuts.
+        let no_dam = Methylation { dam: false, ..Methylation::E_COLI };
+        assert!(find_sites_methylated(&seq, false, no_dam, &[&xbai]).iter().all(|s| s.blocked.is_none()));
+    }
+
+    #[test]
+    fn an_insensitive_enzyme_cuts_a_methylated_site() {
+        // BamHI-like: GGATCC always holds GATC, and Dam has no effect on it.
+        let bamhi = enzyme_with("BamHI", "GGATCC", (1, 5), Effect::Cut, Effect::NoOverlap, Effect::NoOverlap);
+        let mut seq = vec![b'A'; 40];
+        seq[10..16].copy_from_slice(b"GGATCC");
+        let sites = find_sites_methylated(&seq, false, Methylation::E_COLI, &[&bamhi]);
+        assert_eq!(sites.len(), 1);
+        assert!(sites[0].blocked.is_none() && sites[0].impaired.is_none());
+        assert_eq!(sites[0].cuts.len(), 1);
+    }
+
+    #[test]
+    fn an_enzyme_that_needs_methylation_cuts_only_methylated_dna() {
+        let dpni = enzyme_with("DpnI", "GATC", (2, 2), Effect::Required, Effect::NoOverlap, Effect::NoOverlap);
+        let mut seq = vec![b'A'; 30];
+        seq[10..14].copy_from_slice(b"GATC");
+        let cut = find_sites_methylated(&seq, true, Methylation::E_COLI, &[&dpni]);
+        assert_eq!(cut[0].cuts, vec![Cut { pos: 12, overhang: 0 }]);
+        let not = find_sites_methylated(&seq, true, Methylation::NONE, &[&dpni]);
+        assert!(not[0].cuts.is_empty());
+        assert_eq!(not[0].blocked.unwrap().describe(), "not Dam-methylated, which the enzyme needs");
+    }
+
+    #[test]
+    fn impaired_and_variable_effects_warn_but_keep_the_cut() {
+        let stui = enzyme_with("StuI", "AGGCCT", (3, 3), Effect::NoOverlap, Effect::Variable, Effect::NoOverlap);
+        let mut seq = vec![b'A'; 40];
+        seq[10..18].copy_from_slice(b"AGGCCTGG");
+        let sites = find_sites_methylated(&seq, false, Methylation::E_COLI, &[&stui]);
+        assert_eq!(sites[0].cuts.len(), 1);
+        assert_eq!(sites[0].impaired.unwrap().describe(), "may be blocked by Dcm methylation");
+    }
+
+    #[test]
+    fn methylated_bases_land_where_the_methylases_put_them() {
+        // Dcm methylates the inner C of CCWGG on both strands: index 1, and opposite index 3.
+        assert_eq!(methylated_bases(b"AACCAGGAA", false, Methylation::E_COLI), vec![0, 0, 0, 2, 0, 2, 0, 0, 0]);
+        // EcoKI: AAC(N6)GTGC methylated at index 1 and opposite index 10. The other way round
+        // (GCAC(N6)GTT) the marks mirror to indices 2 and 11.
+        let ecoki_hits = |seq: &[u8]| -> Vec<usize> {
+            methylated_bases(seq, false, Methylation::E_COLI).iter().enumerate().filter(|(_, m)| **m & 4 != 0).map(|(ii, _)| ii).collect()
+        };
+        assert_eq!(ecoki_hits(b"AACTTTTTTGTGC"), vec![1, 10]);
+        assert_eq!(ecoki_hits(b"GCACTTTTTTGTT"), vec![2, 11]);
+        // A GATC across the origin of a circle marks its bases on both sides of it.
+        assert_eq!(methylated_bases(b"TCAAAAGA", true, Methylation::E_COLI), vec![1, 0, 0, 0, 0, 0, 0, 1]);
+        // Nothing is marked on unmethylated DNA.
+        assert!(methylated_bases(b"GATCCCAGG", false, Methylation::NONE).iter().all(|&m| m == 0));
+    }
+
+    #[test]
+    fn the_table_knows_the_classic_methylation_cases() {
+        let db = db();
+        let effect = |name: &str, m: Methylase| db.get(name).unwrap().sensitivity.get(m);
+        assert_eq!(effect("XbaI", Methylase::Dam), Effect::Blocked);
+        assert_eq!(effect("ClaI", Methylase::Dam), Effect::Blocked);
+        assert_eq!(effect("BclI", Methylase::Dam), Effect::Blocked);
+        assert_eq!(effect("BamHI", Methylase::Dam), Effect::Cut);
+        assert_eq!(effect("MboI", Methylase::Dam), Effect::Blocked);
+        assert_eq!(effect("Sau3AI", Methylase::Dam), Effect::Cut);
+        assert_eq!(effect("DpnI", Methylase::Dam), Effect::Required);
+        assert_eq!(effect("StuI", Methylase::Dcm), Effect::Blocked);
+        assert_eq!(effect("BstNI", Methylase::Dcm), Effect::Cut);
+        assert_eq!(effect("EcoRI", Methylase::Dam), Effect::NoOverlap);
+        // The real XbaI behaves as the test above expects of it.
+        let xbai = db.get("XbaI").unwrap();
+        let mut seq = vec![b'A'; 40];
+        seq[10..18].copy_from_slice(b"TCTAGATC");
+        assert!(find_sites_methylated(&seq, false, Methylation::E_COLI, &[xbai])[0].blocked.is_some());
     }
 }
